@@ -265,7 +265,6 @@ fun EditorScreen(vm: AppViewModel, path: String) {
                         color = MaterialTheme.colorScheme.onSurface
                     ),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    softWrap = s.editorWrap,
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(vs)
