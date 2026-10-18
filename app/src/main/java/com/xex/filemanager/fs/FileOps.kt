@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.xex.filemanager.model.Album
 import com.xex.filemanager.model.Cat
 import com.xex.filemanager.model.FileItem
 import com.xex.filemanager.model.FileTypes
@@ -359,7 +360,32 @@ object FileOps {
         return out
     }
 
-    fun queryCategory(ctx: Context, cat: Cat, limit: Int = 5000): List<FileItem> {
+    private fun categorySelection(cat: Cat, sinceSec: Long): Pair<String, Array<String>?> = when (cat) {
+        Cat.IMAGES -> Pair("media_type=1", null)
+        Cat.VIDEO -> Pair("media_type=3", null)
+        Cat.AUDIO -> Pair("media_type=2", null)
+        Cat.DOCS -> Pair(
+            FileTypes.document.joinToString(" OR ") { "_data LIKE ?" },
+            FileTypes.document.map { "%.$it" }.toTypedArray()
+        )
+        Cat.ARCHIVES -> Pair(
+            FileTypes.archive.joinToString(" OR ") { "_data LIKE ?" },
+            FileTypes.archive.map { "%.$it" }.toTypedArray()
+        )
+        Cat.APK -> Pair(
+            FileTypes.apk.joinToString(" OR ") { "_data LIKE ?" },
+            FileTypes.apk.map { "%.$it" }.toTypedArray()
+        )
+        Cat.RECENT -> Pair("_data IS NOT NULL AND _size>0 AND date_modified>?", arrayOf(sinceSec.toString()))
+    }
+
+    private fun sinceSeconds(clearedAtMs: Long): Long {
+        val weekAgo = System.currentTimeMillis() / 1000L - 7L * 86400L
+        return maxOf(weekAgo, clearedAtMs / 1000L)
+    }
+
+    /** Файлы категории из MediaStore, новые сверху. */
+    fun queryCategory(ctx: Context, cat: Cat, clearedAtMs: Long = 0L, limit: Int = 30000): List<FileItem> {
         val uri = MediaStore.Files.getContentUri("external")
         val proj = arrayOf(
             MediaStore.Files.FileColumns.DATA,
@@ -367,38 +393,18 @@ object FileOps {
             MediaStore.Files.FileColumns.SIZE,
             MediaStore.Files.FileColumns.DATE_MODIFIED
         )
-        val sel: String
-        val args: Array<String>?
-        when (cat) {
-            Cat.IMAGES -> { sel = "media_type=1"; args = null }
-            Cat.VIDEO -> { sel = "media_type=3"; args = null }
-            Cat.AUDIO -> { sel = "media_type=2"; args = null }
-            Cat.DOCS -> {
-                sel = FileTypes.document.joinToString(" OR ") { "_data LIKE ?" }
-                args = FileTypes.document.map { "%.$it" }.toTypedArray()
-            }
-            Cat.ARCHIVES -> {
-                sel = FileTypes.archive.joinToString(" OR ") { "_data LIKE ?" }
-                args = FileTypes.archive.map { "%.$it" }.toTypedArray()
-            }
-            Cat.APK -> {
-                sel = FileTypes.apk.joinToString(" OR ") { "_data LIKE ?" }
-                args = FileTypes.apk.map { "%.$it" }.toTypedArray()
-            }
-            Cat.RECENT -> { sel = "_data IS NOT NULL AND _size>0"; args = null }
-        }
+        val sel = categorySelection(cat, sinceSeconds(clearedAtMs))
         val out = ArrayList<FileItem>()
-        val cr: ContentResolver = ctx.contentResolver
         try {
-            cr.query(uri, proj, sel, args, "date_modified DESC")?.use { c ->
+            ctx.contentResolver.query(uri, proj, sel.first, sel.second, "date_modified DESC")?.use { c ->
                 val iData = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
                 val iName = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
                 val iSize = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
                 val iDate = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
-                val max = if (cat == Cat.RECENT) 100 else limit
-                while (c.moveToNext() && out.size < max) {
+                while (c.moveToNext() && out.size < limit) {
                     val path = c.getString(iData) ?: continue
-                    if (cat == Cat.RECENT && (path.contains("/.") || path.contains("/Android/"))) continue
+                    if (path.contains("/.")) continue
+                    if (cat == Cat.RECENT && path.contains("/Android/")) continue
                     val f = File(path)
                     if (!f.isFile) continue
                     val name = c.getString(iName) ?: f.name
@@ -409,5 +415,68 @@ object FileOps {
             // MediaStore недоступен — возвращаем что есть
         }
         return out
+    }
+
+    /** Количество и общий размер файлов категории. */
+    fun statCategory(ctx: Context, cat: Cat, clearedAtMs: Long = 0L): Pair<Int, Long> {
+        val uri = MediaStore.Files.getContentUri("external")
+        val proj = arrayOf(MediaStore.Files.FileColumns.DATA, MediaStore.Files.FileColumns.SIZE)
+        val sel = categorySelection(cat, sinceSeconds(clearedAtMs))
+        var count = 0
+        var total = 0L
+        try {
+            ctx.contentResolver.query(uri, proj, sel.first, sel.second, null)?.use { c ->
+                val iData = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
+                val iSize = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
+                while (c.moveToNext()) {
+                    val path = c.getString(iData) ?: continue
+                    if (path.contains("/.")) continue
+                    if (cat == Cat.RECENT && path.contains("/Android/")) continue
+                    count++
+                    total += c.getLong(iSize)
+                }
+            }
+        } catch (e: Exception) {
+            // нет доступа
+        }
+        return Pair(count, total)
+    }
+
+    /** Количество файлов и размер папки (рекурсивно). */
+    fun folderStat(path: String): Pair<Int, Long> {
+        var count = 0
+        var total = 0L
+        val stack = ArrayDeque<String>()
+        stack.add(path)
+        var visited = 0
+        while (stack.isNotEmpty() && visited < 300000) {
+            val dir = stack.removeLast()
+            val list = try {
+                Fs.backend(dir).list(dir)
+            } catch (e: Exception) {
+                null
+            } ?: continue
+            for (c in list) {
+                visited++
+                if (c.isDir) {
+                    stack.add(c.path)
+                } else {
+                    count++
+                    total += c.size
+                }
+            }
+        }
+        return Pair(count, total)
+    }
+
+    fun buildAlbums(list: List<FileItem>, isVideo: Boolean): List<Album> {
+        val groups = LinkedHashMap<String, MutableList<FileItem>>()
+        for (f in list) {
+            val parent = PathUtil.parent(f.path) ?: continue
+            groups.getOrPut(parent) { ArrayList() }.add(f)
+        }
+        return groups.map { (dir, files) ->
+            Album(dir, PathUtil.name(dir), files.size, files[0].path, isVideo)
+        }
     }
 }

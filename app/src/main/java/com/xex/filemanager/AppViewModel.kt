@@ -1,6 +1,9 @@
 package com.xex.filemanager
 
 import android.app.Application
+import android.content.Intent
+import android.net.Uri
+import java.io.File
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
@@ -15,10 +18,13 @@ import androidx.lifecycle.viewModelScope
 import com.xex.filemanager.data.AppSettings
 import com.xex.filemanager.data.TrashEntry
 import com.xex.filemanager.data.TrashStore
+import com.xex.filemanager.fs.AppsRepo
 import com.xex.filemanager.fs.FileOps
 import com.xex.filemanager.fs.Fs
 import com.xex.filemanager.fs.PathUtil
 import com.xex.filemanager.fs.Progress
+import com.xex.filemanager.model.Album
+import com.xex.filemanager.model.AppEntry
 import com.xex.filemanager.model.Cat
 import com.xex.filemanager.model.FileItem
 import com.xex.filemanager.model.FileType
@@ -32,12 +38,13 @@ import kotlinx.coroutines.withContext
 
 sealed interface Screen {
     data object Home : Screen
-    data class Browser(val path: String) : Screen
+    data class Browser(val path: String, val popOnBack: Boolean = false) : Screen
     data class Category(val cat: Cat) : Screen
     data object Trash : Screen
     data object Analyzer : Screen
     data object Prefs : Screen
     data object Terminal : Screen
+    data object Apps : Screen
     data class Images(val paths: List<String>, val index: Int) : Screen
     data class Editor(val path: String) : Screen
 }
@@ -56,6 +63,8 @@ sealed interface AppDialog {
     class MultiRename(val items: List<FileItem>) : AppDialog
     class ArchiveChoice(val item: FileItem) : AppDialog
     class OpenAs(val item: FileItem) : AppDialog
+    class Info(val title: String, val text: String) : AppDialog
+    class AppActions(val entry: AppEntry) : AppDialog
 }
 
 class Clipboard(val items: List<FileItem>, val cut: Boolean)
@@ -91,6 +100,11 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
     var dialog by mutableStateOf<AppDialog?>(null)
     var volumes by mutableStateOf<List<Volume>>(emptyList())
     var trashEntries by mutableStateOf<List<TrashEntry>>(emptyList())
+    var albums by mutableStateOf<List<Album>>(emptyList())
+    var catStats by mutableStateOf<Map<Cat, Pair<Int, Long>>>(emptyMap())
+    var downloadStat by mutableStateOf<Pair<Int, Long>?>(null)
+    var apps by mutableStateOf<List<AppEntry>>(emptyList())
+    var appsLoading by mutableStateOf(false)
 
     val listState = LazyListState()
     val gridState = LazyGridState()
@@ -101,7 +115,7 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
     private var searchJob: Job? = null
 
     init {
-        refreshVolumes()
+        refreshHome()
     }
 
     // ---------- Сообщения ----------
@@ -148,12 +162,17 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun openFolder(path: String) {
-        if (top is Screen.Browser) replaceTop(Screen.Browser(path)) else push(Screen.Browser(path))
+        val t = top
+        if (t is Screen.Browser) replaceTop(Screen.Browser(path, t.popOnBack)) else push(Screen.Browser(path))
     }
 
     fun goUp() {
         val t = top
         if (t !is Screen.Browser) {
+            pop()
+            return
+        }
+        if (t.popOnBack) {
             pop()
             return
         }
@@ -185,7 +204,6 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
         searchResults = null
         searching = false
         searchJob?.cancel()
-        if (top is Screen.Home) refreshVolumes()
         reload()
     }
 
@@ -194,6 +212,78 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
     fun refreshVolumes() {
         viewModelScope.launch {
             volumes = withContext(Dispatchers.IO) { FileOps.volumes(app) }
+        }
+    }
+
+    fun refreshHome() {
+        refreshVolumes()
+        viewModelScope.launch {
+            val cleared = settings.recentClearedAt
+            val stats = withContext(Dispatchers.IO) {
+                val m = HashMap<Cat, Pair<Int, Long>>()
+                for (c in listOf(Cat.IMAGES, Cat.AUDIO, Cat.VIDEO, Cat.DOCS, Cat.RECENT)) {
+                    m[c] = FileOps.statCategory(app, c, cleared)
+                }
+                m
+            }
+            catStats = stats
+            val dl = withContext(Dispatchers.IO) { FileOps.folderStat(Utils.primaryRoot() + "/Download") }
+            downloadStat = dl
+        }
+    }
+
+    fun loadApps() {
+        appsLoading = true
+        viewModelScope.launch {
+            apps = withContext(Dispatchers.IO) { AppsRepo.list(app) }
+            appsLoading = false
+        }
+    }
+
+    fun openApp(pkg: String) {
+        val i = app.packageManager.getLaunchIntentForPackage(pkg)
+        if (i == null) {
+            toast("У этого приложения нет окна запуска")
+            return
+        }
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            app.startActivity(i)
+        } catch (e: Exception) {
+            toast("Не удалось открыть приложение")
+        }
+    }
+
+    fun appDetails(pkg: String) {
+        try {
+            val i = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg"))
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            app.startActivity(i)
+        } catch (e: Exception) {
+            toast("Не удалось открыть сведения о приложении")
+        }
+    }
+
+    fun uninstallApp(pkg: String) {
+        try {
+            val i = Intent(Intent.ACTION_DELETE, Uri.parse("package:$pkg"))
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            app.startActivity(i)
+        } catch (e: Exception) {
+            toast("Не удалось запустить удаление")
+        }
+    }
+
+    fun saveApk(e: AppEntry) {
+        runTask("Сохранение APK") { p ->
+            val dir = Utils.primaryRoot() + "/Download"
+            Fs.local.mkdirs(dir)
+            val wanted = (e.label + "_" + e.version + ".apk").replace('/', '_')
+            val name = PathUtil.uniqueName(Fs.local, dir, wanted, false)
+            p.current = name
+            File(e.apkPath).inputStream().use { ins ->
+                Fs.local.output(PathUtil.join(dir, name), false).use { outs -> ins.copyTo(outs) }
+            }
         }
     }
 
@@ -238,18 +328,30 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
             is Screen.Category -> {
                 if (itemsKey != s) {
                     items = emptyList()
+                    albums = emptyList()
                     itemsKey = s
                 }
                 loading = true
                 error = null
+                val cleared = settings.recentClearedAt
                 loadJob = viewModelScope.launch {
-                    val res = withContext(Dispatchers.IO) { FileOps.queryCategory(app, s.cat) }
-                    items = res
+                    val res = withContext(Dispatchers.IO) {
+                        val list = FileOps.queryCategory(app, s.cat, cleared)
+                        val alb = if (s.cat == Cat.IMAGES || s.cat == Cat.VIDEO) {
+                            FileOps.buildAlbums(list, s.cat == Cat.VIDEO)
+                        } else {
+                            emptyList()
+                        }
+                        Pair(list, alb)
+                    }
+                    items = res.first
+                    albums = res.second
                     loading = false
                 }
             }
             is Screen.Trash -> refreshTrash()
-            is Screen.Home -> refreshVolumes()
+            is Screen.Home -> refreshHome()
+            is Screen.Apps -> loadApps()
             else -> {}
         }
     }

@@ -45,6 +45,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
@@ -55,6 +56,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.xex.filemanager.fs.ShizukuManager
 import com.xex.filemanager.ui.AnalyzerScreen
+import com.xex.filemanager.ui.AppsScreen
+import com.xex.filemanager.ui.LocalXfm
 import com.xex.filemanager.ui.BrowserScreen
 import com.xex.filemanager.ui.DialogHost
 import com.xex.filemanager.ui.EditorScreen
@@ -151,14 +154,15 @@ private fun MainContent(vm: AppViewModel) {
 
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = vm.top is Screen.Home,
+        gesturesEnabled = vm.top is Screen.Home || vm.top is Screen.Browser || vm.top is Screen.Category,
         drawerContent = { DrawerContent(vm) { scope.launch { drawerState.close() } } }
     ) {
         Box(Modifier.fillMaxSize()) {
             when (val t = vm.top) {
                 is Screen.Home -> HomeScreen(vm) { scope.launch { drawerState.open() } }
-                is Screen.Browser -> BrowserScreen(vm)
-                is Screen.Category -> BrowserScreen(vm)
+                is Screen.Browser -> BrowserScreen(vm) { scope.launch { drawerState.open() } }
+                is Screen.Category -> BrowserScreen(vm) { scope.launch { drawerState.open() } }
+                is Screen.Apps -> AppsScreen(vm)
                 is Screen.Trash -> TrashScreen(vm)
                 is Screen.Analyzer -> AnalyzerScreen(vm)
                 is Screen.Prefs -> SettingsScreen(vm)
@@ -193,7 +197,7 @@ private fun DrawerContent(vm: AppViewModel, close: () -> Unit) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .background(LocalXfm.current.toolbar)
                     .statusBarsPadding()
                     .padding(20.dp)
             ) {
@@ -202,18 +206,18 @@ private fun DrawerContent(vm: AppViewModel, close: () -> Unit) {
                         painterResource(R.drawable.ic_folder),
                         null,
                         Modifier.size(40.dp),
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        tint = MaterialTheme.colorScheme.primary
                     )
                     Spacer(Modifier.height(10.dp))
                     Text(
                         "XFM Файлы",
                         style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                        color = Color.White
                     )
                     Text(
                         "Файловый менеджер + Shizuku",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                        color = Color(0xFFBDBDBD)
                     )
                 }
             }
@@ -241,6 +245,9 @@ private fun DrawerContent(vm: AppViewModel, close: () -> Unit) {
                 }
             }
             HorizontalDivider(Modifier.padding(vertical = 8.dp, horizontal = 16.dp))
+            Item("Программы", R.drawable.ic_android) { vm.openFromRoot(Screen.Apps) }
+            Item("Архивы", R.drawable.ic_archive) { vm.openFromRoot(Screen.Category(com.xex.filemanager.model.Cat.ARCHIVES)) }
+            Item("APK-файлы", R.drawable.ic_android) { vm.openFromRoot(Screen.Category(com.xex.filemanager.model.Cat.APK)) }
             Item("Корзина", R.drawable.ic_delete_sweep) { vm.openFromRoot(Screen.Trash) }
             Item("Анализ памяти", R.drawable.ic_pie) { vm.openFromRoot(Screen.Analyzer) }
             Item("Терминал (Shizuku)", R.drawable.ic_terminal) { vm.openFromRoot(Screen.Terminal) }

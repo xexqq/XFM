@@ -34,3 +34,17 @@ fun plural(n: Int, one: String, few: String, many: String): String {
 }
 
 fun countLabel(n: Int): String = "$n ${plural(n, "объект", "объекта", "объектов")}"
+
+private val shortFmt = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
+
+fun formatDateShort(ms: Long): String {
+    if (ms <= 0L) return ""
+    return synchronized(shortFmt) { shortFmt.format(Date(ms)) }
+}
+
+private val dayFmt = SimpleDateFormat("d MMM yyyy 'г.'", Locale("ru"))
+
+fun dayLabel(ms: Long): String {
+    if (ms <= 0L) return "—"
+    return synchronized(dayFmt) { dayFmt.format(Date(ms)) }
+}

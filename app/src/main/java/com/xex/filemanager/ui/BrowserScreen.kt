@@ -3,8 +3,6 @@
 package com.xex.filemanager.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,22 +16,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -44,8 +39,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -56,7 +49,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -77,14 +69,16 @@ import com.xex.filemanager.AppDialog
 import com.xex.filemanager.AppViewModel
 import com.xex.filemanager.R
 import com.xex.filemanager.Screen
+import com.xex.filemanager.fs.Fs
 import com.xex.filemanager.fs.PathUtil
 import com.xex.filemanager.fs.ShizukuManager
 import com.xex.filemanager.fs.ShizukuState
+import com.xex.filemanager.model.Cat
 import com.xex.filemanager.model.FileItem
 import com.xex.filemanager.model.FileTypes
 import com.xex.filemanager.model.Volume
 import com.xex.filemanager.util.Utils
-import com.xex.filemanager.util.countLabel
+import com.xex.filemanager.util.dayLabel
 import kotlinx.coroutines.delay
 
 fun sortItems(list: List<FileItem>, by: Int, asc: Boolean, foldersFirst: Boolean): List<FileItem> {
@@ -99,75 +93,61 @@ fun sortItems(list: List<FileItem>, by: Int, asc: Boolean, foldersFirst: Boolean
     return list.sortedWith(full)
 }
 
-private fun crumbs(path: String, volumes: List<Volume>): List<Pair<String, String>> {
+private fun buildCrumbs(path: String, volumes: List<Volume>, nav: (String) -> Unit): List<Crumb> {
     val vol = volumes.firstOrNull { path == it.path || path.startsWith(it.path + "/") }
-    val res = ArrayList<Pair<String, String>>()
+    val res = ArrayList<Crumb>()
     var cur = ""
     var rest = path
     if (vol != null) {
-        res.add(Pair(vol.label, vol.path))
-        cur = vol.path
-        rest = path.removePrefix(vol.path)
+        val vp = vol.path
+        res.add(Crumb(null, R.drawable.ic_x_drive, null) { nav(vp) })
+        cur = vp
+        rest = path.removePrefix(vp)
     } else {
-        res.add(Pair("/", "/"))
+        res.add(Crumb(null, R.drawable.ic_x_slash, null) { nav("/") })
     }
     for (seg in rest.split('/').filter { it.isNotEmpty() }) {
         cur = "$cur/$seg"
-        res.add(Pair(seg, cur))
+        val target = cur
+        res.add(Crumb(seg, null, null) { nav(target) })
     }
     return res
 }
 
-@Composable
-private fun Breadcrumbs(path: String, volumes: List<Volume>, onClick: (String) -> Unit) {
-    val segs = remember(path, volumes) { crumbs(path, volumes) }
-    val scroll = rememberScrollState()
-    LaunchedEffect(path, scroll.maxValue) { scroll.scrollTo(scroll.maxValue) }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(scroll)
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        segs.forEachIndexed { i, seg ->
-            if (i > 0) {
-                Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 2.dp))
-            }
-            val last = i == segs.lastIndex
-            Text(
-                text = seg.first,
-                style = MaterialTheme.typography.labelLarge,
-                color = if (last) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier
-                    .clickable { onClick(seg.second) }
-                    .padding(horizontal = 6.dp, vertical = 6.dp)
-            )
-        }
-    }
+private fun volumeLabelOrName(path: String, volumes: List<Volume>): String {
+    val v = volumes.firstOrNull { it.path == path }
+    if (v != null) return v.label
+    if (path == "/") return "Система"
+    return PathUtil.name(path)
 }
 
 @Composable
-fun BrowserScreen(vm: AppViewModel) {
+fun BrowserScreen(vm: AppViewModel, onMenu: () -> Unit) {
     val s = vm.settings
     val ctx = LocalContext.current
+    val x = LocalXfm.current
     val top = vm.top
     val path = (top as? Screen.Browser)?.path
     val cat = (top as? Screen.Category)?.cat
+    val isAlbums = cat == Cat.IMAGES || cat == Cat.VIDEO
+    val isRecent = cat == Cat.RECENT
 
     val base = vm.searchResults ?: vm.items
-    val shown = remember(base, vm.query, vm.searchResults, s.showHidden, s.sortBy, s.sortAsc, s.foldersFirst) {
+    val shown = remember(base, vm.query, vm.searchResults, s.showHidden, s.sortBy, s.sortAsc, s.foldersFirst, isRecent) {
         var l = base
         if (!s.showHidden) l = l.filter { !it.name.startsWith(".") }
         val q = vm.query.trim()
         if (q.isNotEmpty() && vm.searchResults == null) l = l.filter { it.name.contains(q, ignoreCase = true) }
-        sortItems(l, s.sortBy, s.sortAsc, s.foldersFirst)
+        if (isRecent) l.sortedByDescending { it.modified } else sortItems(l, s.sortBy, s.sortAsc, s.foldersFirst)
+    }
+    val shownAlbums = remember(vm.albums, vm.query) {
+        val q = vm.query.trim()
+        if (q.isEmpty()) vm.albums else vm.albums.filter { it.name.contains(q, ignoreCase = true) }
     }
     val selected = remember(shown, vm.selection) { shown.filter { it.path in vm.selection } }
     val selMode = vm.selection.isNotEmpty()
 
     var menuOpen by remember { mutableStateOf(false) }
-    var fabOpen by remember { mutableStateOf(false) }
     var sheetOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(path) {
@@ -188,13 +168,46 @@ fun BrowserScreen(vm: AppViewModel) {
         else -> ""
     }
 
+    val crumbs: List<Crumb> = if (path != null) {
+        buildCrumbs(path, vm.volumes) { vm.openFolder(it) }
+    } else if (cat != null) {
+        val ci = catIcon(cat)
+        listOf(Crumb(null, ci.res, ci.tint) {})
+    } else {
+        emptyList()
+    }
+
+    val trailing: (@Composable () -> Unit)? = when {
+        path != null && vm.volumes.any { it.path == path } -> {
+            val v = vm.volumes.first { it.path == path }
+            val frac = if (v.total > 0L) (v.total - v.free).toFloat() / v.total.toFloat() else 0f
+            val pct = (frac * 100f).toInt()
+            val c: @Composable () -> Unit = {
+                PathButton(pct.toString() + "% занято", leading = { PieIcon(frac, x.buttonText) }) {
+                    vm.push(Screen.Analyzer)
+                }
+            }
+            c
+        }
+        isRecent -> {
+            val c: @Composable () -> Unit = {
+                PathButton("Очистить") {
+                    s.recentClearedAt = System.currentTimeMillis()
+                    vm.reload()
+                }
+            }
+            c
+        }
+        else -> null
+    }
+
     Scaffold(
         topBar = {
             Column {
-                TopAppBar(
+                XfmTopBar(
                     title = {
                         if (selMode) {
-                            Text("Выбрано: ${vm.selection.size}")
+                            Text("Выбрано: " + vm.selection.size)
                         } else if (vm.searchOpen) {
                             val fr = remember { FocusRequester() }
                             LaunchedEffect(Unit) { fr.requestFocus() }
@@ -206,6 +219,11 @@ fun BrowserScreen(vm: AppViewModel) {
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                                 keyboardActions = KeyboardActions(onSearch = { vm.runSearch() }),
                                 colors = TextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    cursorColor = Color.White,
+                                    focusedPlaceholderColor = Color(0xFFBBBBBB),
+                                    unfocusedPlaceholderColor = Color(0xFFBBBBBB),
                                     focusedContainerColor = Color.Transparent,
                                     unfocusedContainerColor = Color.Transparent,
                                     focusedIndicatorColor = Color.Transparent,
@@ -214,23 +232,18 @@ fun BrowserScreen(vm: AppViewModel) {
                                 modifier = Modifier.fillMaxWidth().focusRequester(fr)
                             )
                         } else {
-                            Column {
-                                Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(
-                                    countLabel(shown.size),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     },
                     navigationIcon = {
                         IconButton(onClick = {
-                            if (selMode) vm.clearSelection() else vm.onBack()
+                            if (selMode) vm.clearSelection()
+                            else if (vm.searchOpen) vm.closeSearch()
+                            else onMenu()
                         }) {
                             Icon(
-                                if (selMode) Icons.Filled.Close else Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Назад"
+                                if (selMode || vm.searchOpen) Icons.Filled.Close else Icons.Filled.Menu,
+                                contentDescription = "Меню"
                             )
                         }
                     },
@@ -259,9 +272,11 @@ fun BrowserScreen(vm: AppViewModel) {
                                 IconButton(onClick = { vm.query = "" }) { Icon(Icons.Filled.Clear, "Очистить") }
                             }
                         } else {
-                            IconButton(onClick = { vm.openSearch() }) { Icon(Icons.Filled.Search, "Поиск") }
-                            IconButton(onClick = { sheetOpen = true }) {
-                                Icon(painterResource(R.drawable.ic_sort), "Вид и сортировка")
+                            if (!isRecent) {
+                                IconButton(onClick = { vm.openSearch() }) { Icon(Icons.Filled.Search, "Поиск") }
+                                IconButton(onClick = { sheetOpen = true }) {
+                                    Icon(painterResource(R.drawable.ic_tune), "Вид и сортировка")
+                                }
                             }
                             Box {
                                 IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, "Ещё") }
@@ -271,21 +286,41 @@ fun BrowserScreen(vm: AppViewModel) {
                                         leadingIcon = { Icon(Icons.Filled.Refresh, null) },
                                         onClick = { menuOpen = false; vm.reload() }
                                     )
+                                    if (path != null) {
+                                        DropdownMenuItem(
+                                            text = { Text("Новая папка") },
+                                            leadingIcon = { Icon(painterResource(R.drawable.ic_new_folder), null) },
+                                            onClick = {
+                                                menuOpen = false
+                                                vm.dialog = AppDialog.Input("Новая папка", "Имя папки", "", "Создать") { vm.createFolder(it) }
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Новый файл") },
+                                            leadingIcon = { Icon(painterResource(R.drawable.ic_file), null) },
+                                            onClick = {
+                                                menuOpen = false
+                                                vm.dialog = AppDialog.Input("Новый файл", "Имя файла", "новый.txt", "Создать") { vm.createFile(it) }
+                                            }
+                                        )
+                                    }
                                     DropdownMenuItem(
                                         text = { Text("Выбрать все") },
                                         leadingIcon = { Icon(painterResource(R.drawable.ic_select_all), null) },
                                         onClick = { menuOpen = false; vm.selectAll(shown) }
                                     )
-                                    DropdownMenuItem(
-                                        text = { Text(if (s.showHidden) "Скрыть скрытые файлы" else "Показать скрытые файлы") },
-                                        leadingIcon = {
-                                            Icon(
-                                                painterResource(if (s.showHidden) R.drawable.ic_visibility_off else R.drawable.ic_visibility),
-                                                null
-                                            )
-                                        },
-                                        onClick = { menuOpen = false; s.showHidden = !s.showHidden }
-                                    )
+                                    if (!isRecent) {
+                                        DropdownMenuItem(
+                                            text = { Text(if (s.showHidden) "Скрыть скрытые файлы" else "Показать скрытые файлы") },
+                                            leadingIcon = {
+                                                Icon(
+                                                    painterResource(if (s.showHidden) R.drawable.ic_visibility_off else R.drawable.ic_visibility),
+                                                    null
+                                                )
+                                            },
+                                            onClick = { menuOpen = false; s.showHidden = !s.showHidden }
+                                        )
+                                    }
                                     if (path != null) {
                                         DropdownMenuItem(
                                             text = { Text(if (s.isBookmarked(path)) "Убрать из закладок" else "В закладки") },
@@ -303,33 +338,39 @@ fun BrowserScreen(vm: AppViewModel) {
                                             onClick = { menuOpen = false; Utils.copyText(ctx, path) }
                                         )
                                     }
+                                    DropdownMenuItem(
+                                        text = { Text("Анализ памяти") },
+                                        leadingIcon = { Icon(painterResource(R.drawable.ic_pie), null) },
+                                        onClick = { menuOpen = false; vm.push(Screen.Analyzer) }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Настройки") },
+                                        onClick = { menuOpen = false; vm.push(Screen.Prefs) }
+                                    )
                                 }
                             }
                         }
                     }
                 )
-                if (path != null && !selMode) {
-                    Surface(color = MaterialTheme.colorScheme.surface) {
-                        Breadcrumbs(path, vm.volumes) { vm.openFolder(it) }
-                    }
-                }
+                PathBar(crumbs, onHome = { vm.goHome() }, trailing = trailing)
                 if (vm.searchOpen && path != null) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        FilterChip(
-                            selected = vm.deepSearch,
-                            onClick = { vm.deepSearch = !vm.deepSearch },
-                            label = { Text("Во вложенных папках") }
-                        )
-                        if (vm.searching) {
-                            Spacer(Modifier.width(12.dp))
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Surface(color = MaterialTheme.colorScheme.background) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            FilterChip(
+                                selected = vm.deepSearch,
+                                onClick = { vm.deepSearch = !vm.deepSearch },
+                                label = { Text("Во вложенных папках") }
+                            )
+                            if (vm.searching) {
+                                Spacer(Modifier.width(12.dp))
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            }
                         }
                     }
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
         },
         bottomBar = {
@@ -349,7 +390,7 @@ fun BrowserScreen(vm: AppViewModel) {
                                 style = MaterialTheme.typography.labelLarge
                             )
                             Text(
-                                countLabel(cb.items.size),
+                                com.xex.filemanager.util.countLabel(cb.items.size),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -359,39 +400,13 @@ fun BrowserScreen(vm: AppViewModel) {
                     }
                 }
             }
-        },
-        floatingActionButton = {
-            if (path != null && !selMode && !vm.searchOpen) {
-                Box {
-                    FloatingActionButton(onClick = { fabOpen = true }) {
-                        Icon(Icons.Filled.Add, "Создать")
-                    }
-                    DropdownMenu(expanded = fabOpen, onDismissRequest = { fabOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Новая папка") },
-                            leadingIcon = { Icon(painterResource(R.drawable.ic_new_folder), null) },
-                            onClick = {
-                                fabOpen = false
-                                vm.dialog = AppDialog.Input("Новая папка", "Имя папки", "", "Создать") { vm.createFolder(it) }
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Новый файл") },
-                            leadingIcon = { Icon(painterResource(R.drawable.ic_file), null) },
-                            onClick = {
-                                fabOpen = false
-                                vm.dialog = AppDialog.Input("Новый файл", "Имя файла", "новый.txt", "Создать") { vm.createFile(it) }
-                            }
-                        )
-                    }
-                }
-            }
         }
     ) { pad ->
         Box(Modifier.fillMaxSize().padding(pad)) {
             val err = vm.error
+            val nothingYet = if (isAlbums) vm.albums.isEmpty() && vm.items.isEmpty() else vm.items.isEmpty()
             when {
-                vm.loading && vm.items.isEmpty() -> {
+                vm.loading && nothingYet -> {
                     CircularProgressIndicator(Modifier.align(Alignment.Center))
                 }
                 err != null -> {
@@ -402,7 +417,7 @@ fun BrowserScreen(vm: AppViewModel) {
                         Icon(painterResource(R.drawable.ic_shield), null, Modifier.size(56.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.size(12.dp))
                         Text(err, style = MaterialTheme.typography.titleMedium)
-                        if (path != null && com.xex.filemanager.fs.Fs.needsPrivilege(path)) {
+                        if (path != null && Fs.needsPrivilege(path)) {
                             Spacer(Modifier.size(8.dp))
                             val st = ShizukuManager.state
                             Text(
@@ -416,18 +431,56 @@ fun BrowserScreen(vm: AppViewModel) {
                         }
                     }
                 }
+                isAlbums -> {
+                    if (shownAlbums.isEmpty()) {
+                        Text(
+                            if (vm.query.isNotBlank()) "Ничего не найдено" else "Ничего нет",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    } else {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(100.dp),
+                            state = vm.gridState,
+                            contentPadding = PaddingValues(4.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            gridItems(shownAlbums, key = { it.path }) { a ->
+                                AlbumCell(a, s.thumbs) { vm.push(Screen.Browser(a.path, true)) }
+                            }
+                        }
+                    }
+                }
                 shown.isEmpty() -> {
                     Text(
-                        if (vm.query.isNotBlank()) "Ничего не найдено" else "Папка пуста",
+                        if (vm.query.isNotBlank()) "Ничего не найдено" else if (isRecent) "Новых файлов нет" else "Папка пуста",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.align(Alignment.Center)
                     )
                 }
+                isRecent -> {
+                    val groups = remember(shown) { shown.groupBy { dayLabel(it.modified) } }
+                    LazyColumn(Modifier.fillMaxSize()) {
+                        groups.forEach { (label, list) ->
+                            item(key = "hdr" + label) { SectionHeader(label) }
+                            items(list, key = { it.path }) { item ->
+                                FileRow(
+                                    item = item,
+                                    selected = item.path in vm.selection,
+                                    compact = false,
+                                    thumbs = s.thumbs,
+                                    onClick = { if (selMode) vm.toggleSelect(item.path) else vm.open(item, shown) },
+                                    onLong = { vm.toggleSelect(item.path) }
+                                )
+                            }
+                        }
+                    }
+                }
                 s.viewMode == 1 -> {
                     LazyVerticalGrid(
-                        columns = GridCells.Adaptive(104.dp),
+                        columns = GridCells.Adaptive(88.dp),
                         state = vm.gridState,
-                        contentPadding = PaddingValues(6.dp),
+                        contentPadding = PaddingValues(4.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
                         gridItems(shown, key = { it.path }) { item ->
@@ -464,13 +517,6 @@ fun BrowserScreen(vm: AppViewModel) {
             ViewSheet(vm)
         }
     }
-}
-
-private fun volumeLabelOrName(path: String, volumes: List<Volume>): String {
-    val v = volumes.firstOrNull { it.path == path }
-    if (v != null) return v.label
-    if (path == "/") return "Корень /"
-    return PathUtil.name(path)
 }
 
 @Composable

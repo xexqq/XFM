@@ -66,6 +66,26 @@ fun DialogHost(vm: AppViewModel) {
             },
             dismissButton = { TextButton(onClick = close) { Text("Отмена") } }
         )
+        is AppDialog.Info -> AlertDialog(
+            onDismissRequest = close,
+            title = { Text(d.title) },
+            text = { Text(d.text) },
+            confirmButton = { TextButton(onClick = close) { Text("Понятно") } }
+        )
+        is AppDialog.AppActions -> AlertDialog(
+            onDismissRequest = close,
+            title = { Text(d.entry.label) },
+            text = { Text(d.entry.pkg + "\n" + d.entry.version + " • " + formatSize(d.entry.apkSize)) },
+            confirmButton = {
+                Column {
+                    TextButton(onClick = { close(); vm.openApp(d.entry.pkg) }) { Text("Открыть") }
+                    TextButton(onClick = { close(); vm.appDetails(d.entry.pkg) }) { Text("О приложении") }
+                    TextButton(onClick = { close(); vm.saveApk(d.entry) }) { Text("Сохранить APK в Download") }
+                    TextButton(onClick = { close(); vm.uninstallApp(d.entry.pkg) }) { Text("Удалить") }
+                }
+            },
+            dismissButton = { TextButton(onClick = close) { Text("Отмена") } }
+        )
         is AppDialog.OpenAs -> AlertDialog(
             onDismissRequest = close,
             title = { Text("Открыть как…") },

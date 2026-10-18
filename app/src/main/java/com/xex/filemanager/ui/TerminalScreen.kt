@@ -24,7 +24,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -68,7 +67,7 @@ fun TerminalScreen(vm: AppViewModel) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            XfmTopBar(
                 title = { Text("Терминал (Shizuku)") },
                 navigationIcon = {
                     IconButton(onClick = { vm.pop() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") }

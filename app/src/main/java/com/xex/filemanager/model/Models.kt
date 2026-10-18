@@ -18,13 +18,13 @@ enum class FileType(val label: String, @DrawableRes val icon: Int, val color: Co
 }
 
 enum class Cat(val title: String, @DrawableRes val icon: Int, val color: Color) {
-    IMAGES("Изображения", R.drawable.ic_image, Color(0xFF943FE5)),
+    IMAGES("Фото", R.drawable.ic_image, Color(0xFF943FE5)),
     VIDEO("Видео", R.drawable.ic_movie, Color(0xFFD92525)),
     AUDIO("Аудио", R.drawable.ic_audio, Color(0xFF00B2AC)),
     DOCS("Документы", R.drawable.ic_description, Color(0xFF2987D9)),
     ARCHIVES("Архивы", R.drawable.ic_archive, Color(0xFF8AA19C)),
-    APK("Приложения", R.drawable.ic_android, Color(0xFF3DDC84)),
-    RECENT("Недавние", R.drawable.ic_history, Color(0xFFF2851F))
+    APK("APK-файлы", R.drawable.ic_android, Color(0xFF3DDC84)),
+    RECENT("Новые файлы", R.drawable.ic_history, Color(0xFFF2851F))
 }
 
 data class FileItem(
@@ -41,6 +41,23 @@ data class FileItem(
     val type: FileType
         get() = FileTypes.of(this)
 }
+
+data class Album(
+    val path: String,
+    val name: String,
+    val count: Int,
+    val cover: String,
+    val isVideo: Boolean
+)
+
+data class AppEntry(
+    val label: String,
+    val pkg: String,
+    val version: String,
+    val apkPath: String,
+    val apkSize: Long,
+    val system: Boolean
+)
 
 data class Volume(
     val path: String,

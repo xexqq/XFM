@@ -38,7 +38,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,7 +57,7 @@ fun SettingsScreen(vm: AppViewModel) {
     val ctx = LocalContext.current
     Scaffold(
         topBar = {
-            TopAppBar(
+            XfmTopBar(
                 title = { Text("Настройки") },
                 navigationIcon = {
                     IconButton(onClick = { vm.pop() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") }
@@ -120,6 +119,10 @@ fun SettingsScreen(vm: AppViewModel) {
             if (Build.VERSION.SDK_INT >= 31) {
                 SwitchRow("Цвета из обоев (Material You)", "Использовать системную палитру Android 12+", s.dynamic) { s.dynamic = it }
             }
+
+            // ---------- Главный экран ----------
+            SectionTitle("Главный экран")
+            SwitchRow("Показывать плитку «Система»", "Корень файловой системы (/). С Shizuku открывает защищённые папки", s.showSystem) { s.showSystem = it }
 
             // ---------- Вид ----------
             SectionTitle("Вид списка")

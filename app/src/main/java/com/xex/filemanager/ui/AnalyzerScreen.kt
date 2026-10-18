@@ -34,7 +34,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -123,7 +122,7 @@ fun AnalyzerScreen(vm: AppViewModel) {
     Scaffold(
         topBar = {
             Column {
-                TopAppBar(
+                XfmTopBar(
                     title = { Text("Анализ памяти") },
                     navigationIcon = {
                         IconButton(onClick = { cancel(); vm.pop() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") }

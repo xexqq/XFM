@@ -11,7 +11,7 @@ import kotlin.reflect.KProperty
 data class Palette(val id: String, val name: String, val seed: Color)
 
 val Palettes = listOf(
-    Palette("teal", "Бирюза", Color(0xFF00A99A)),
+    Palette("teal", "Бирюза", Color(0xFF008578)),
     Palette("blue", "Океан", Color(0xFF2F8BFF)),
     Palette("violet", "Аметист", Color(0xFF8E5CF5)),
     Palette("pink", "Роза", Color(0xFFE8508F)),
@@ -53,9 +53,12 @@ class AppSettings(ctx: Context) {
 
     // Тема
     var themeId by strPref("theme", "teal")
-    var darkMode by intPref("dark", 2) // 0 система, 1 светлая, 2 тёмная
+    var darkMode by intPref("dark", 1) // 0 система, 1 светлая, 2 тёмная
     var amoled by boolPref("amoled", false)
     var dynamic by boolPref("dynamic", false)
+
+    // Главная
+    var showSystem by boolPref("showSystem", false)
 
     // Вид
     var viewMode by intPref("view", 0) // 0 список, 1 сетка, 2 компактно
@@ -78,6 +81,14 @@ class AppSettings(ctx: Context) {
 
     private var bookmarksRaw by strPref("bookmarks", "")
     private var recentsRaw by strPref("recents", "")
+
+    private var recentClearedRaw by strPref("recentCleared", "0")
+
+    var recentClearedAt: Long
+        get() = recentClearedRaw.toLongOrNull() ?: 0L
+        set(v) {
+            recentClearedRaw = v.toString()
+        }
 
     val bookmarks: List<String>
         get() = bookmarksRaw.split('\n').filter { it.isNotEmpty() }
