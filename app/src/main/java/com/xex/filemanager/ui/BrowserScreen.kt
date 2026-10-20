@@ -77,6 +77,7 @@ import com.xex.filemanager.model.Cat
 import com.xex.filemanager.model.FileItem
 import com.xex.filemanager.model.FileTypes
 import com.xex.filemanager.model.Volume
+import com.xex.filemanager.net.Net
 import com.xex.filemanager.util.Utils
 import com.xex.filemanager.util.dayLabel
 import kotlinx.coroutines.delay
@@ -93,7 +94,24 @@ fun sortItems(list: List<FileItem>, by: Int, asc: Boolean, foldersFirst: Boolean
     return list.sortedWith(full)
 }
 
+private fun buildNetCrumbs(path: String, nav: (String) -> Unit): List<Crumb> {
+    val conn = Net.connOf(path)
+    val rootPath = if (conn != null) Net.rootOf(conn) else path
+    val res = ArrayList<Crumb>()
+    val icon = if (conn != null && conn.cloud) R.drawable.ic_cloud else R.drawable.ic_desktop
+    val tint = if (conn != null && conn.cloud) Color(0xFF5B9FE8) else Color(0xFF8D6E63)
+    res.add(Crumb(null, icon, tint) { nav(rootPath) })
+    var cur = rootPath
+    for (seg in path.removePrefix(rootPath).split('/').filter { it.isNotEmpty() }) {
+        cur = "$cur/$seg"
+        val target = cur
+        res.add(Crumb(seg, null, null) { nav(target) })
+    }
+    return res
+}
+
 private fun buildCrumbs(path: String, volumes: List<Volume>, nav: (String) -> Unit): List<Crumb> {
+    if (Net.isNet(path)) return buildNetCrumbs(path, nav)
     val vol = volumes.firstOrNull { path == it.path || path.startsWith(it.path + "/") }
     val res = ArrayList<Crumb>()
     var cur = ""
@@ -115,6 +133,7 @@ private fun buildCrumbs(path: String, volumes: List<Volume>, nav: (String) -> Un
 }
 
 private fun volumeLabelOrName(path: String, volumes: List<Volume>): String {
+    if (Net.isConnRoot(path)) return Net.connOf(path)?.name ?: "Подключение"
     val v = volumes.firstOrNull { it.path == path }
     if (v != null) return v.label
     if (path == "/") return "Система"
@@ -551,7 +570,12 @@ private fun SelectionMenu(vm: AppViewModel, sel: List<FileItem>, shown: List<Fil
             leadingIcon = { Icon(painterResource(R.drawable.ic_open_in_new), null) },
             onClick = { close(); vm.dialog = AppDialog.OpenAs(one) }
         )
-        if (!one.isDir && one.ext in FileTypes.zipLike) {
+        if (!one.isDir && com.xex.filemanager.fs.Archives.supported(one.name)) {
+            DropdownMenuItem(
+                text = { Text("Открыть как архив") },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_unarchive), null) },
+                onClick = { close(); vm.push(Screen.Archive(one.path)) }
+            )
             DropdownMenuItem(
                 text = { Text("Распаковать…") },
                 leadingIcon = { Icon(painterResource(R.drawable.ic_unarchive), null) },
@@ -566,13 +590,9 @@ private fun SelectionMenu(vm: AppViewModel, sel: List<FileItem>, shown: List<Fil
         )
     }
     DropdownMenuItem(
-        text = { Text("Сжать в ZIP") },
+        text = { Text("Сжать в архив…") },
         leadingIcon = { Icon(painterResource(R.drawable.ic_archive), null) },
-        onClick = {
-            close()
-            val def = if (sel.size == 1) sel[0].name.substringBeforeLast('.', sel[0].name) else "Архив"
-            vm.dialog = AppDialog.Input("Сжать в ZIP", "Имя архива", def, "Сжать") { n -> vm.compress(sel, n) }
-        }
+        onClick = { close(); vm.dialog = AppDialog.Compress(sel) }
     )
     DropdownMenuItem(
         text = { Text("Закладка") },

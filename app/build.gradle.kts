@@ -57,6 +57,12 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "/META-INF/DEPENDENCIES"
+            excludes += "/META-INF/LICENSE*"
+            excludes += "/META-INF/NOTICE*"
+            excludes += "/META-INF/INDEX.LIST"
+            excludes += "/META-INF/versions/**"
+            pickFirsts += "/META-INF/MANIFEST.MF"
         }
     }
 }
@@ -77,4 +83,10 @@ dependencies {
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.apache.commons:commons-compress:1.21")
+    implementation("org.tukaani:xz:1.9")
+    implementation("com.github.junrar:junrar:7.5.5")
+    implementation("commons-net:commons-net:3.9.0")
+    implementation("com.github.mwiede:jsch:0.2.17")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

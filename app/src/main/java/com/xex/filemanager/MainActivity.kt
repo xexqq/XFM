@@ -57,6 +57,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.xex.filemanager.fs.ShizukuManager
 import com.xex.filemanager.ui.AnalyzerScreen
 import com.xex.filemanager.ui.AppsScreen
+import com.xex.filemanager.ui.ArchiveScreen
+import com.xex.filemanager.ui.BigFilesScreen
+import com.xex.filemanager.ui.ConnsScreen
+import com.xex.filemanager.ui.DupesScreen
+import com.xex.filemanager.ui.NetShareScreen
 import com.xex.filemanager.ui.LocalXfm
 import com.xex.filemanager.ui.BrowserScreen
 import com.xex.filemanager.ui.DialogHost
@@ -154,7 +159,7 @@ private fun MainContent(vm: AppViewModel) {
 
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = vm.top is Screen.Home || vm.top is Screen.Browser || vm.top is Screen.Category,
+        gesturesEnabled = vm.top is Screen.Home || vm.top is Screen.Browser || vm.top is Screen.Category || vm.top is Screen.Analyzer,
         drawerContent = { DrawerContent(vm) { scope.launch { drawerState.close() } } }
     ) {
         Box(Modifier.fillMaxSize()) {
@@ -164,7 +169,12 @@ private fun MainContent(vm: AppViewModel) {
                 is Screen.Category -> BrowserScreen(vm) { scope.launch { drawerState.open() } }
                 is Screen.Apps -> AppsScreen(vm)
                 is Screen.Trash -> TrashScreen(vm)
-                is Screen.Analyzer -> AnalyzerScreen(vm)
+                is Screen.Analyzer -> AnalyzerScreen(vm) { scope.launch { drawerState.open() } }
+                is Screen.BigFiles -> BigFilesScreen(vm)
+                is Screen.Dupes -> DupesScreen(vm)
+                is Screen.NetShare -> NetShareScreen(vm)
+                is Screen.Conns -> ConnsScreen(vm, t.cloud)
+                is Screen.Archive -> ArchiveScreen(vm, t)
                 is Screen.Prefs -> SettingsScreen(vm)
                 is Screen.Terminal -> TerminalScreen(vm)
                 is Screen.Images -> ImageViewerScreen(vm, t)
@@ -228,13 +238,6 @@ private fun DrawerContent(vm: AppViewModel, close: () -> Unit) {
                     vm.openFromRoot(Screen.Browser(v.path))
                 }
             }
-            HorizontalDivider(Modifier.padding(vertical = 8.dp, horizontal = 16.dp))
-            Item("Загрузки", R.drawable.ic_download) { vm.openFromRoot(Screen.Browser("$root/Download")) }
-            Item("Камера (DCIM)", R.drawable.ic_image) { vm.openFromRoot(Screen.Browser("$root/DCIM")) }
-            Item("Изображения", R.drawable.ic_image) { vm.openFromRoot(Screen.Browser("$root/Pictures")) }
-            Item("Документы", R.drawable.ic_description) { vm.openFromRoot(Screen.Browser("$root/Documents")) }
-            Item("Музыка", R.drawable.ic_audio) { vm.openFromRoot(Screen.Browser("$root/Music")) }
-            Item("Видео", R.drawable.ic_movie) { vm.openFromRoot(Screen.Browser("$root/Movies")) }
             val bms = vm.settings.bookmarks
             if (bms.isNotEmpty()) {
                 HorizontalDivider(Modifier.padding(vertical = 8.dp, horizontal = 16.dp))
@@ -249,7 +252,7 @@ private fun DrawerContent(vm: AppViewModel, close: () -> Unit) {
             Item("Архивы", R.drawable.ic_archive) { vm.openFromRoot(Screen.Category(com.xex.filemanager.model.Cat.ARCHIVES)) }
             Item("APK-файлы", R.drawable.ic_android) { vm.openFromRoot(Screen.Category(com.xex.filemanager.model.Cat.APK)) }
             Item("Корзина", R.drawable.ic_delete_sweep) { vm.openFromRoot(Screen.Trash) }
-            Item("Анализ памяти", R.drawable.ic_pie) { vm.openFromRoot(Screen.Analyzer) }
+            Item("Анализ места", R.drawable.ic_pie) { vm.openFromRoot(Screen.Analyzer) }
             Item("Терминал (Shizuku)", R.drawable.ic_terminal) { vm.openFromRoot(Screen.Terminal) }
             Item("Настройки и Shizuku", R.drawable.ic_palette) { vm.openFromRoot(Screen.Prefs) }
             Spacer(Modifier.height(16.dp))

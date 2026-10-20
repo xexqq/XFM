@@ -48,7 +48,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 @Composable
-private fun AppIcon(pkg: String) {
+fun AppIcon(pkg: String, size: androidx.compose.ui.unit.Dp = 44.dp) {
     val ctx = LocalContext.current
     val bmp by produceState<ImageBitmap?>(null, pkg) {
         value = withContext(Dispatchers.IO) {
@@ -61,14 +61,14 @@ private fun AppIcon(pkg: String) {
     }
     val b = bmp
     if (b != null) {
-        Image(bitmap = b, contentDescription = null, modifier = Modifier.size(44.dp))
+        Image(bitmap = b, contentDescription = null, modifier = Modifier.size(size))
     } else {
-        Box(Modifier.size(44.dp))
+        Box(Modifier.size(size))
     }
 }
 
 @Composable
-private fun AppRow(e: AppEntry, onClick: () -> Unit) {
+private fun AppRow(e: AppEntry, size: Long, onClick: () -> Unit) {
     val x = LocalXfm.current
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Row(
@@ -97,7 +97,7 @@ private fun AppRow(e: AppEntry, onClick: () -> Unit) {
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
-                    Text(text = formatSize(e.apkSize), fontSize = 14.sp, color = x.secondary, maxLines = 1)
+                    Text(text = formatSize(size), fontSize = 14.sp, color = x.secondary, maxLines = 1)
                 }
             }
         }
@@ -108,7 +108,11 @@ private fun AppRow(e: AppEntry, onClick: () -> Unit) {
 @Composable
 fun AppsScreen(vm: AppViewModel) {
     var showAll by remember { mutableStateOf(false) }
-    val list = remember(vm.apps, showAll) { if (showAll) vm.apps else vm.apps.filter { !it.system } }
+    val sizes = remember(vm.analysis) { vm.analysis?.apps?.associate { it.first.pkg to it.second } ?: emptyMap() }
+    val list = remember(vm.apps, showAll, sizes) {
+        val l = if (showAll) vm.apps else vm.apps.filter { !it.system }
+        if (sizes.isEmpty()) l else l.sortedByDescending { sizes[it.pkg] ?: it.apkSize }
+    }
     Scaffold(
         topBar = {
             Column {
@@ -140,7 +144,7 @@ fun AppsScreen(vm: AppViewModel) {
             } else {
                 LazyColumn(Modifier.fillMaxSize()) {
                     items(list, key = { it.pkg }) { e ->
-                        AppRow(e) { vm.dialog = AppDialog.AppActions(e) }
+                        AppRow(e, sizes[e.pkg] ?: e.apkSize) { vm.dialog = AppDialog.AppActions(e) }
                     }
                 }
             }

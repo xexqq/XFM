@@ -43,6 +43,8 @@ import com.xex.filemanager.AppViewModel
 import com.xex.filemanager.R
 import com.xex.filemanager.Screen
 import com.xex.filemanager.model.Cat
+import com.xex.filemanager.net.ConnStore
+import com.xex.filemanager.net.ShareState
 import com.xex.filemanager.util.Utils
 import com.xex.filemanager.util.formatSize
 
@@ -104,6 +106,11 @@ fun HomeScreen(vm: AppViewModel, onMenu: () -> Unit) {
     fun statInfo(p: Pair<Int, Long>?): String? =
         if (p == null) null else formatSize(p.second) + " (" + p.first + ")"
 
+    fun cloudInfo(cloud: Boolean): String? {
+        val n = ConnStore.conns.count { it.cloud == cloud }
+        return if (n == 0) null else "подключений: $n"
+    }
+
     Scaffold(
         topBar = {
             XfmTopBar(
@@ -120,7 +127,7 @@ fun HomeScreen(vm: AppViewModel, onMenu: () -> Unit) {
                                 onClick = { menuOpen = false; vm.push(Screen.Trash) }
                             )
                             DropdownMenuItem(
-                                text = { Text("Анализ памяти") },
+                                text = { Text("Анализ места") },
                                 onClick = { menuOpen = false; vm.push(Screen.Analyzer) }
                             )
                             DropdownMenuItem(
@@ -142,7 +149,7 @@ fun HomeScreen(vm: AppViewModel, onMenu: () -> Unit) {
         }
     ) { pad ->
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(96.dp),
+            columns = GridCells.Fixed(3),
             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 14.dp),
             modifier = Modifier.fillMaxSize().padding(pad)
         ) {
@@ -226,52 +233,37 @@ fun HomeScreen(vm: AppViewModel, onMenu: () -> Unit) {
             item(key = "cloud") {
                 HomeTile(
                     name = "Облако",
-                    info = null,
+                    info = cloudInfo(true),
                     icon = {
                         BoxIcon {
                             Icon(painterResource(R.drawable.ic_cloud), null, Modifier.size(40.dp), tint = Color(0xFF5B9FE8))
                         }
                     },
-                    onClick = {
-                        vm.dialog = AppDialog.Info(
-                            "Облако",
-                            "Подключение облачных хранилищ пока не реализовано. Эта плитка добавлена для совпадения внешнего вида."
-                        )
-                    }
+                    onClick = { vm.push(Screen.Conns(true)) }
                 )
             }
             item(key = "remote") {
                 HomeTile(
                     name = "Удалённые службы",
-                    info = null,
+                    info = cloudInfo(false),
                     icon = {
                         BoxIcon {
                             Icon(painterResource(R.drawable.ic_desktop), null, Modifier.size(38.dp), tint = Color(0xFF8D6E63))
                         }
                     },
-                    onClick = {
-                        vm.dialog = AppDialog.Info(
-                            "Удалённые службы",
-                            "Подключение по FTP, SFTP и SMB пока не реализовано. Эта плитка добавлена для совпадения внешнего вида."
-                        )
-                    }
+                    onClick = { vm.push(Screen.Conns(false)) }
                 )
             }
             item(key = "network") {
                 HomeTile(
                     name = "Доступ из сети",
-                    info = null,
+                    info = if (ShareState.running) "включён" else null,
                     icon = {
                         BoxIcon {
                             Icon(painterResource(R.drawable.ic_devices), null, Modifier.size(40.dp), tint = Color(0xFF3E6B63))
                         }
                     },
-                    onClick = {
-                        vm.dialog = AppDialog.Info(
-                            "Доступ из сети",
-                            "Доступ к файлам по Wi-Fi пока не реализован. Эта плитка добавлена для совпадения внешнего вида."
-                        )
-                    }
+                    onClick = { vm.push(Screen.NetShare) }
                 )
             }
         }

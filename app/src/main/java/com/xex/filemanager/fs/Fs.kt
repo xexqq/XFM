@@ -3,6 +3,8 @@ package com.xex.filemanager.fs
 import android.os.ParcelFileDescriptor
 import com.xex.filemanager.IFileService
 import com.xex.filemanager.model.FileItem
+import com.xex.filemanager.net.Net
+import com.xex.filemanager.net.NetFs
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileNotFoundException
@@ -157,18 +159,22 @@ object Fs {
         androidDirs.matches(path) && !path.contains("/Android/data/com.xex.filemanager")
 
     fun needsPrivilege(path: String): Boolean {
+        if (Net.isNet(path)) return false
         if (androidDirs.matches(path)) return isAppDataDir(path)
         if (path == "/") return false
         return !(path.startsWith("/storage") || path.startsWith("/sdcard"))
     }
 
     fun backend(path: String): FsBackend {
+        if (Net.isNet(path)) return NetFs
         val r = remote
         if (r != null && mode != 0 && (mode == 2 || needsPrivilege(path))) return r
         return local
     }
 
+    /** true, если файл нельзя открыть как обычный File (Shizuku или сеть). */
     fun isRemote(path: String): Boolean {
+        if (Net.isNet(path)) return true
         val r = remote
         return r != null && backend(path) === r
     }

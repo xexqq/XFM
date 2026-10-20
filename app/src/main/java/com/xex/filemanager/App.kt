@@ -6,11 +6,15 @@ import coil.ImageLoaderFactory
 import coil.decode.VideoFrameDecoder
 import com.xex.filemanager.fs.Fs
 import com.xex.filemanager.fs.ShizukuManager
+import com.xex.filemanager.net.ConnStore
+import com.xex.filemanager.net.Net
 
 class App : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         Fs.mode = getSharedPreferences("settings", MODE_PRIVATE).getInt("shizukuMode", 1)
+        Net.ctx = this
+        ConnStore.init(this)
         ShizukuManager.init(this)
     }
 

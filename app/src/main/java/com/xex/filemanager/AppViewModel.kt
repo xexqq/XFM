@@ -18,7 +18,13 @@ import androidx.lifecycle.viewModelScope
 import com.xex.filemanager.data.AppSettings
 import com.xex.filemanager.data.TrashEntry
 import com.xex.filemanager.data.TrashStore
+import com.xex.filemanager.fs.AnalysisResult
+import com.xex.filemanager.fs.Analyzer
+import com.xex.filemanager.fs.ArchiveEntry
+import com.xex.filemanager.fs.Archives
 import com.xex.filemanager.fs.AppsRepo
+import com.xex.filemanager.fs.ShizukuManager
+import com.xex.filemanager.net.Net
 import com.xex.filemanager.fs.FileOps
 import com.xex.filemanager.fs.Fs
 import com.xex.filemanager.fs.PathUtil
@@ -45,6 +51,11 @@ sealed interface Screen {
     data object Prefs : Screen
     data object Terminal : Screen
     data object Apps : Screen
+    data object BigFiles : Screen
+    data object Dupes : Screen
+    data object NetShare : Screen
+    data class Conns(val cloud: Boolean) : Screen
+    data class Archive(val path: String, val dir: String = "") : Screen
     data class Images(val paths: List<String>, val index: Int) : Screen
     data class Editor(val path: String) : Screen
 }
@@ -65,6 +76,8 @@ sealed interface AppDialog {
     class OpenAs(val item: FileItem) : AppDialog
     class Info(val title: String, val text: String) : AppDialog
     class AppActions(val entry: AppEntry) : AppDialog
+    class Compress(val items: List<FileItem>) : AppDialog
+    class ConnEdit(val cloud: Boolean) : AppDialog
 }
 
 class Clipboard(val items: List<FileItem>, val cut: Boolean)
@@ -105,6 +118,16 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
     var downloadStat by mutableStateOf<Pair<Int, Long>?>(null)
     var apps by mutableStateOf<List<AppEntry>>(emptyList())
     var appsLoading by mutableStateOf(false)
+    var analysis by mutableStateOf<AnalysisResult?>(null)
+    var analyzing by mutableStateOf(false)
+    var analysisPhase by mutableStateOf("")
+    var analysisPath by mutableStateOf("")
+    var analysisCount by mutableStateOf(0)
+    var arcEntries by mutableStateOf<List<ArchiveEntry>>(emptyList())
+    var arcLoading by mutableStateOf(false)
+    var arcError by mutableStateOf<String?>(null)
+    private var arcKey: String? = null
+    private var analysisJob: Job? = null
 
     val listState = LazyListState()
     val gridState = LazyGridState()
@@ -176,7 +199,7 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
             pop()
             return
         }
-        val isRoot = volumes.any { it.path == t.path }
+        val isRoot = volumes.any { it.path == t.path } || Net.isConnRoot(t.path)
         val par = if (isRoot) null else PathUtil.parent(t.path)
         if (par == null) pop() else replaceTop(Screen.Browser(par))
     }
@@ -190,7 +213,12 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
             closeSearch()
             return true
         }
-        if (top is Screen.Browser) {
+        val t = top
+        if (t is Screen.Archive && t.dir.isNotEmpty()) {
+            replaceTop(Screen.Archive(t.path, t.dir.substringBeforeLast('/', "")))
+            return true
+        }
+        if (t is Screen.Browser) {
             goUp()
             return true
         }
@@ -352,6 +380,8 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
             is Screen.Trash -> refreshTrash()
             is Screen.Home -> refreshHome()
             is Screen.Apps -> loadApps()
+            is Screen.Analyzer -> startAnalysis(false)
+            is Screen.Archive -> loadArchive(s.path)
             else -> {}
         }
     }
@@ -647,26 +677,186 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun compress(list: List<FileItem>, name: String) {
+    fun compress(list: List<FileItem>, name: String, format: String) {
         if (list.isEmpty()) return
         val dir = (top as? Screen.Browser)?.path ?: PathUtil.parent(list[0].path) ?: return
-        val fn = if (name.endsWith(".zip", true)) name else "$name.zip"
+        val ext = when (format) {
+            "targz" -> ".tar.gz"
+            "7z" -> ".7z"
+            else -> ".zip"
+        }
+        val fn = if (name.lowercase().endsWith(ext)) name else name + ext
         runTask("Архивация") { p ->
             p.total = list.sumOf { FileOps.sizeOf(it) }
             val b = Fs.backend(dir)
             val dest = PathUtil.join(dir, PathUtil.uniqueName(b, dir, fn, false))
-            FileOps.zip(list, dest, p, ByteArray(256 * 1024))
+            val buf = ByteArray(256 * 1024)
+            when (format) {
+                "targz" -> Archives.createTarGz(list, dest, p, buf)
+                "7z" -> Archives.createSevenZ(list, dest, app.cacheDir, p, buf)
+                else -> FileOps.zip(list, dest, p, buf)
+            }
         }
     }
 
     fun extract(item: FileItem, intoFolder: Boolean) {
-        val parent = PathUtil.parent(item.path) ?: return
-        val base = item.name.substringBeforeLast('.', item.name)
+        extractArchive(item.path, null, intoFolder)
+    }
+
+    // ---------- Архивы ----------
+
+    fun loadArchive(path: String) {
+        if (arcKey == path && arcEntries.isNotEmpty()) return
+        val kind = Archives.kind(PathUtil.name(path))
+        if (kind == null) {
+            arcError = "Формат не поддерживается"
+            return
+        }
+        arcKey = path
+        arcLoading = true
+        arcError = null
+        arcEntries = emptyList()
+        viewModelScope.launch {
+            val res = withContext(Dispatchers.IO) {
+                try {
+                    val local = Utils.localCopy(app, FileItem(path, PathUtil.name(path), false, 0L))
+                    Pair(Archives.list(local, kind, app.cacheDir), null as String?)
+                } catch (e: Throwable) {
+                    Pair(emptyList<ArchiveEntry>(), e.message ?: "Не удалось прочитать архив")
+                }
+            }
+            arcEntries = res.first
+            arcError = res.second
+            arcLoading = false
+        }
+    }
+
+    fun openArchiveEntry(arcPath: String, e: FileItem) {
+        val kind = Archives.kind(PathUtil.name(arcPath)) ?: return
+        var result: File? = null
+        runTask("Извлечение", {
+            val f = result
+            if (f != null) {
+                val it2 = FileItem(f.path, f.name, false, f.length(), f.lastModified())
+                open(it2, listOf(it2))
+            }
+        }) { p ->
+            p.current = e.name
+            val local = Utils.localCopy(app, FileItem(arcPath, PathUtil.name(arcPath), false, 0L))
+            val dir = File(app.cacheDir, "arc/" + System.nanoTime())
+            dir.mkdirs()
+            val target = File(dir, e.name)
+            Archives.forEach(local, kind, app.cacheDir) { ent, supplier ->
+                if (ent.path == e.path) {
+                    supplier().use { ins -> target.outputStream().use { o -> ins.copyTo(o, 256 * 1024) } }
+                    false
+                } else {
+                    true
+                }
+            }
+            if (!target.exists()) throw java.io.IOException("Файл не найден в архиве")
+            result = target
+        }
+    }
+
+    fun extractArchive(arcPath: String, selected: List<FileItem>?, intoFolder: Boolean = true) {
+        val kind = Archives.kind(PathUtil.name(arcPath))
+        if (kind == null) {
+            toast("Формат не поддерживается")
+            return
+        }
+        val parent = PathUtil.parent(arcPath) ?: return
+        val base = Archives.baseName(PathUtil.name(arcPath))
         runTask("Распаковка") { p ->
+            val local = Utils.localCopy(app, FileItem(arcPath, PathUtil.name(arcPath), false, 0L))
             val b = Fs.backend(parent)
             val dest = if (intoFolder) PathUtil.join(parent, PathUtil.uniqueName(b, parent, base, true)) else parent
-            p.current = item.name
-            FileOps.unzip(item.path, dest, p, ByteArray(256 * 1024))
+            p.current = PathUtil.name(arcPath)
+            Archives.extract(local, kind, app.cacheDir, dest, selected?.map { it.path }, p, ByteArray(256 * 1024))
+        }
+    }
+
+    // ---------- Анализ места ----------
+
+    fun startAnalysis(force: Boolean) {
+        if (analyzing) return
+        if (analysis != null && !force) return
+        val vol = volumes.firstOrNull() ?: return
+        analyzing = true
+        analysisPhase = "Сканирование файлов"
+        analysisPath = ""
+        analysisCount = 0
+        analysisJob = viewModelScope.launch {
+            try {
+                val r = Analyzer.run(app, vol) { phase, path, count ->
+                    analysisPhase = phase
+                    analysisPath = path
+                    analysisCount = count
+                }
+                analysis = r
+            } catch (e: Exception) {
+                toast("Анализ прерван: " + (e.message ?: ""))
+            }
+            analyzing = false
+        }
+    }
+
+    fun cancelAnalysis() {
+        analysisJob?.cancel()
+        analyzing = false
+    }
+
+    fun pruneAnalysis(deleted: Set<String>) {
+        val a = analysis ?: return
+        val groups = a.dupGroups.map { g -> g.filter { it.path !in deleted } }.filter { it.size > 1 }
+        val big = a.bigFiles.filter { it.path !in deleted }
+        analysis = a.copy(
+            bigFiles = big,
+            bigTotal = big.sumOf { it.size },
+            dupGroups = groups,
+            dupTotal = groups.sumOf { it[0].size * (it.size - 1) }
+        )
+    }
+
+    fun clearCaches() {
+        if (ShizukuManager.state == com.xex.filemanager.fs.ShizukuState.CONNECTED) {
+            runTask("Очистка кэша", { startAnalysisLater() }) { p ->
+                p.current = "pm trim-caches"
+                val out = ShizukuManager.exec("pm trim-caches 999G")
+                if (out.contains("Exception", true) || out.contains("Error", true)) {
+                    throw java.io.IOException(out.take(200))
+                }
+            }
+            return
+        }
+        try {
+            val i = Intent("android.os.storage.action.CLEAR_APP_CACHE")
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            app.startActivity(i)
+        } catch (e: Exception) {
+            try {
+                val i = Intent(android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS)
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                app.startActivity(i)
+                toast("Открой «Кэш» и очисти его. С Shizuku очистка пройдёт автоматически")
+            } catch (e2: Exception) {
+                toast("Не удалось открыть настройки хранилища")
+            }
+        }
+    }
+
+    private fun startAnalysisLater() {
+        analysis = null
+        startAnalysis(true)
+    }
+
+    fun openUsageAccess() {
+        try {
+            val i = Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS)
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            app.startActivity(i)
+        } catch (e: Exception) {
+            toast("Не удалось открыть настройки")
         }
     }
 
@@ -689,7 +879,7 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
                 if (item.path in imgs) push(Screen.Images(imgs, imgs.indexOf(item.path))) else openExternal(item)
             }
             FileType.TEXT -> if (item.size <= 1_000_000L) push(Screen.Editor(item.path)) else openExternal(item)
-            FileType.ARCHIVE -> if (item.ext in FileTypes.zipLike) {
+            FileType.ARCHIVE -> if (Archives.supported(item.name)) {
                 dialog = AppDialog.ArchiveChoice(item)
             } else {
                 openExternal(item)

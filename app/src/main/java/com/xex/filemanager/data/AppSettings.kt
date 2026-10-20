@@ -75,6 +75,10 @@ class AppSettings(ctx: Context) {
     // Shizuku: 0 выкл, 1 авто, 2 всегда
     var shizukuMode by intPref("shizukuMode", 1)
 
+    // Доступ из сети
+    var sharePort by intPref("sharePort", 8080)
+    var sharePass by strPref("sharePass", "")
+
     // Редактор
     var editorWrap by boolPref("editorWrap", true)
     var editorSize by intPref("editorSize", 14)

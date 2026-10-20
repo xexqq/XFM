@@ -59,6 +59,7 @@ fun DialogHost(vm: AppViewModel) {
             text = { Text("Что сделать с архивом?") },
             confirmButton = {
                 Column {
+                    TextButton(onClick = { close(); vm.push(Screen.Archive(d.item.path)) }) { Text("Просмотреть содержимое") }
                     TextButton(onClick = { close(); vm.extract(d.item, true) }) { Text("Распаковать в папку") }
                     TextButton(onClick = { close(); vm.extract(d.item, false) }) { Text("Распаковать сюда") }
                     TextButton(onClick = { close(); vm.openExternal(d.item) }) { Text("Открыть другим приложением") }
@@ -66,6 +67,8 @@ fun DialogHost(vm: AppViewModel) {
             },
             dismissButton = { TextButton(onClick = close) { Text("Отмена") } }
         )
+        is AppDialog.Compress -> CompressDialog(vm, d, close)
+        is AppDialog.ConnEdit -> ConnDialog(d, close)
         is AppDialog.Info -> AlertDialog(
             onDismissRequest = close,
             title = { Text(d.title) },
@@ -100,6 +103,9 @@ fun DialogHost(vm: AppViewModel) {
                     TextButton(onClick = { close(); vm.openExternal(d.item, "audio/*") }) { Text("Аудио") }
                     TextButton(onClick = { close(); vm.openExternal(d.item, "video/*") }) { Text("Видео") }
                     TextButton(onClick = { close(); vm.openExternal(d.item, "*/*") }) { Text("Любой тип") }
+                    if (com.xex.filemanager.fs.Archives.supported(d.item.name)) {
+                        TextButton(onClick = { close(); vm.push(Screen.Archive(d.item.path)) }) { Text("Архив (просмотр)") }
+                    }
                 }
             },
             dismissButton = { TextButton(onClick = close) { Text("Отмена") } }
@@ -283,5 +289,50 @@ fun ProgressHost(vm: AppViewModel) {
             }
         },
         confirmButton = { TextButton(onClick = { vm.cancelTask() }) { Text("Отмена") } }
+    )
+}
+
+
+@Composable
+private fun CompressDialog(vm: AppViewModel, d: AppDialog.Compress, close: () -> Unit) {
+    val def = if (d.items.size == 1) {
+        com.xex.filemanager.fs.Archives.baseName(d.items[0].name)
+    } else {
+        "Архив"
+    }
+    var name by remember { mutableStateOf(def) }
+    var format by remember { mutableStateOf("zip") }
+    AlertDialog(
+        onDismissRequest = close,
+        title = { Text("Сжать в архив") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Имя архива") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(10.dp))
+                Row {
+                    listOf("zip" to "ZIP", "targz" to "TAR.GZ", "7z" to "7Z").forEach { f ->
+                        androidx.compose.material3.FilterChip(
+                            selected = format == f.first,
+                            onClick = { format = f.first },
+                            label = { Text(f.second) },
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = name.isNotBlank() && !name.contains('/'),
+                onClick = { close(); vm.compress(d.items, name.trim(), format) }
+            ) { Text("Сжать") }
+        },
+        dismissButton = { TextButton(onClick = close) { Text("Отмена") } }
     )
 }
