@@ -93,8 +93,8 @@ object Archives {
                 }
                 TarArchiveInputStream(ins).use { t ->
                     var e: TarArchiveEntry? = t.nextTarEntry
-                    while (e != null) {
-                        val cur: TarArchiveEntry = e
+                    while (true) {
+                        val cur: TarArchiveEntry = e ?: break
                         val ent = ArchiveEntry(clean(cur.name), cur.isDirectory, cur.size, cur.modTime?.time ?: 0L)
                         if (ent.path.isNotEmpty()) {
                             if (!visit(ent) { t }) break
@@ -105,8 +105,8 @@ object Archives {
             }
             "7z" -> SevenZFile(file).use { sz ->
                 var e: SevenZArchiveEntry? = sz.nextEntry
-                while (e != null) {
-                    val cur: SevenZArchiveEntry = e
+                while (true) {
+                    val cur: SevenZArchiveEntry = e ?: break
                     val mod = if (cur.hasLastModifiedDate) cur.lastModifiedDate.time else 0L
                     val ent = ArchiveEntry(clean(cur.name), cur.isDirectory, cur.size, mod)
                     if (ent.path.isNotEmpty()) {
@@ -117,8 +117,8 @@ object Archives {
             }
             "rar" -> Archive(file).use { a ->
                 var h = a.nextFileHeader()
-                while (h != null) {
-                    val cur = h
+                while (true) {
+                    val cur = h ?: break
                     val ent = ArchiveEntry(clean(cur.fileName), cur.isDirectory, cur.fullUnpackSize, cur.mTime?.time ?: 0L)
                     if (ent.path.isNotEmpty()) {
                         val go = visit(ent) {
