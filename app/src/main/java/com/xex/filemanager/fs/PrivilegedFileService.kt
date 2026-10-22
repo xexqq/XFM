@@ -15,6 +15,28 @@ class PrivilegedFileService : IFileService.Stub() {
         System.exit(0)
     }
 
+    private fun candidates(path: String): List<String> {
+        val out = ArrayList<String>()
+        out.add(path)
+        val pre = "/storage/emulated/0"
+        if (path == pre || path.startsWith("$pre/")) {
+            val rest = path.substring(pre.length)
+            out.add("/sdcard$rest")
+            out.add("/mnt/pass_through/0/emulated/0$rest")
+            out.add("/mnt/user/0/emulated/0$rest")
+            out.add("/data/media/0$rest")
+        }
+        return out
+    }
+
+    private fun pick(path: String): File {
+        for (c in candidates(path)) {
+            val f = File(c)
+            if (f.exists()) return f
+        }
+        return File(path)
+    }
+
     private fun line(f: File): String {
         val dir = f.isDirectory
         val count = if (dir) (f.list()?.size ?: -1) else -1
@@ -25,20 +47,29 @@ class PrivilegedFileService : IFileService.Stub() {
 
     override fun list(path: String): String {
         return try {
-            val files = File(path).listFiles() ?: return "!"
+            var files: Array<File>? = null
+            for (c in candidates(path)) {
+                files = File(c).listFiles()
+                if (files != null) break
+            }
+            if (files == null) {
+                val f = File(path)
+                return "!uid=" + android.os.Process.myUid() + ", exists=" + f.exists() +
+                    ", isDir=" + f.isDirectory + ", canRead=" + f.canRead()
+            }
             val sb = StringBuilder()
             for (f in files) {
                 sb.append(line(f)).append('\n')
             }
             sb.toString()
         } catch (e: Throwable) {
-            "!"
+            "!" + e.javaClass.simpleName + ": " + e.message
         }
     }
 
     override fun stat(path: String): String {
         return try {
-            val f = File(path)
+            val f = pick(path)
             if (f.exists()) line(f) else ""
         } catch (e: Throwable) {
             ""
@@ -47,7 +78,7 @@ class PrivilegedFileService : IFileService.Stub() {
 
     override fun openRead(path: String): ParcelFileDescriptor? {
         return try {
-            ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
+            ParcelFileDescriptor.open(pick(path), ParcelFileDescriptor.MODE_READ_ONLY)
         } catch (e: Throwable) {
             null
         }
@@ -58,7 +89,7 @@ class PrivilegedFileService : IFileService.Stub() {
             val mode = ParcelFileDescriptor.MODE_WRITE_ONLY or
                 ParcelFileDescriptor.MODE_CREATE or
                 (if (append) ParcelFileDescriptor.MODE_APPEND else ParcelFileDescriptor.MODE_TRUNCATE)
-            ParcelFileDescriptor.open(File(path), mode)
+            ParcelFileDescriptor.open(pick(path), mode)
         } catch (e: Throwable) {
             null
         }
@@ -66,7 +97,7 @@ class PrivilegedFileService : IFileService.Stub() {
 
     override fun mkdirs(path: String): Boolean {
         return try {
-            val f = File(path)
+            val f = pick(path)
             f.isDirectory || f.mkdirs()
         } catch (e: Throwable) {
             false
@@ -75,7 +106,7 @@ class PrivilegedFileService : IFileService.Stub() {
 
     override fun delete(path: String): Boolean {
         return try {
-            File(path).deleteRecursively()
+            pick(path).deleteRecursively()
         } catch (e: Throwable) {
             false
         }
@@ -83,7 +114,7 @@ class PrivilegedFileService : IFileService.Stub() {
 
     override fun rename(from: String, to: String): Boolean {
         return try {
-            File(from).renameTo(File(to))
+            pick(from).renameTo(pick(to))
         } catch (e: Throwable) {
             false
         }
@@ -91,7 +122,7 @@ class PrivilegedFileService : IFileService.Stub() {
 
     override fun exists(path: String): Boolean {
         return try {
-            File(path).exists()
+            pick(path).exists()
         } catch (e: Throwable) {
             false
         }

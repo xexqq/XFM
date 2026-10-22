@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -68,7 +69,7 @@ fun AppIcon(pkg: String, size: androidx.compose.ui.unit.Dp = 44.dp) {
 }
 
 @Composable
-private fun AppRow(e: AppEntry, size: Long, onClick: () -> Unit) {
+private fun AppRow(e: AppEntry, size: Long, onManage: (() -> Unit)?, onClick: () -> Unit) {
     val x = LocalXfm.current
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Row(
@@ -98,6 +99,11 @@ private fun AppRow(e: AppEntry, size: Long, onClick: () -> Unit) {
                         modifier = Modifier.weight(1f)
                     )
                     Text(text = formatSize(size), fontSize = 14.sp, color = x.secondary, maxLines = 1)
+                }
+            }
+            if (onManage != null) {
+                IconButton(onClick = onManage) {
+                    Icon(painterResource(R.drawable.ic_storage), "Память приложения", tint = x.section)
                 }
             }
         }
@@ -144,7 +150,10 @@ fun AppsScreen(vm: AppViewModel) {
             } else {
                 LazyColumn(Modifier.fillMaxSize()) {
                     items(list, key = { it.pkg }) { e ->
-                        AppRow(e, sizes[e.pkg] ?: e.apkSize) { vm.dialog = AppDialog.AppActions(e) }
+                        AppRow(
+                            e, sizes[e.pkg] ?: e.apkSize,
+                            if (e.manageSpace != null) ({ vm.openManageSpace(e) }) else null
+                        ) { vm.dialog = AppDialog.AppActions(e) }
                     }
                 }
             }

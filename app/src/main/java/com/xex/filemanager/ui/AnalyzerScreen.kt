@@ -158,7 +158,7 @@ private fun Report(vm: AppViewModel, a: AnalysisResult) {
     val frac = if (v.total > 0L) used.toFloat() / v.total.toFloat() else 0f
     val root = v.path
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 4.dp)) {
-        ReportCard(v.label, formatSize(v.free) + " свободно", "Ещё", null, { vm.push(Screen.Browser(root)) }) {
+        ReportCard(v.label, formatSize(v.free) + " свободно", "Ещё", null, { vm.push(Screen.Browser(root, false, true)) }) {
             Text(
                 text = (frac * 100f).toInt().toString() + "%",
                 fontSize = 40.sp,

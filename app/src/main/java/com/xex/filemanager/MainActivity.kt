@@ -59,6 +59,10 @@ import com.xex.filemanager.ui.AnalyzerScreen
 import com.xex.filemanager.ui.AppsScreen
 import com.xex.filemanager.ui.ArchiveScreen
 import com.xex.filemanager.ui.BigFilesScreen
+import com.xex.filemanager.ui.CodeScreen
+import com.xex.filemanager.ui.DecompileScreen
+import com.xex.filemanager.ui.PhotoEditorScreen
+import com.xex.filemanager.ui.PlayerScreen
 import com.xex.filemanager.ui.ConnsScreen
 import com.xex.filemanager.ui.DupesScreen
 import com.xex.filemanager.ui.NetShareScreen
@@ -171,6 +175,10 @@ private fun MainContent(vm: AppViewModel) {
                 is Screen.Trash -> TrashScreen(vm)
                 is Screen.Analyzer -> AnalyzerScreen(vm) { scope.launch { drawerState.open() } }
                 is Screen.BigFiles -> BigFilesScreen(vm)
+                is Screen.Code -> CodeScreen(vm)
+                is Screen.Player -> PlayerScreen(vm, t)
+                is Screen.PhotoEdit -> PhotoEditorScreen(vm, t.path)
+                is Screen.Decompile -> DecompileScreen(vm, t.path)
                 is Screen.Dupes -> DupesScreen(vm)
                 is Screen.NetShare -> NetShareScreen(vm)
                 is Screen.Conns -> ConnsScreen(vm, t.cloud)

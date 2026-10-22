@@ -21,6 +21,9 @@ import com.xex.filemanager.data.TrashStore
 import com.xex.filemanager.fs.AnalysisResult
 import com.xex.filemanager.fs.Analyzer
 import com.xex.filemanager.fs.ArchiveEntry
+import com.xex.filemanager.fs.Converter
+import com.xex.filemanager.fs.DecResult
+import com.xex.filemanager.fs.Decompiler
 import com.xex.filemanager.fs.Archives
 import com.xex.filemanager.fs.AppsRepo
 import com.xex.filemanager.fs.ShizukuManager
@@ -44,7 +47,7 @@ import kotlinx.coroutines.withContext
 
 sealed interface Screen {
     data object Home : Screen
-    data class Browser(val path: String, val popOnBack: Boolean = false) : Screen
+    data class Browser(val path: String, val popOnBack: Boolean = false, val sizes: Boolean = false) : Screen
     data class Category(val cat: Cat) : Screen
     data object Trash : Screen
     data object Analyzer : Screen
@@ -54,6 +57,10 @@ sealed interface Screen {
     data object BigFiles : Screen
     data object Dupes : Screen
     data object NetShare : Screen
+    data object Code : Screen
+    data class Player(val paths: List<String>, val index: Int, val video: Boolean) : Screen
+    data class PhotoEdit(val path: String) : Screen
+    data class Decompile(val path: String) : Screen
     data class Conns(val cloud: Boolean) : Screen
     data class Archive(val path: String, val dir: String = "") : Screen
     data class Images(val paths: List<String>, val index: Int) : Screen
@@ -77,6 +84,7 @@ sealed interface AppDialog {
     class Info(val title: String, val text: String) : AppDialog
     class AppActions(val entry: AppEntry) : AppDialog
     class Compress(val items: List<FileItem>) : AppDialog
+    class Convert(val item: FileItem) : AppDialog
     class ConnEdit(val cloud: Boolean) : AppDialog
 }
 
@@ -118,6 +126,13 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
     var downloadStat by mutableStateOf<Pair<Int, Long>?>(null)
     var apps by mutableStateOf<List<AppEntry>>(emptyList())
     var appsLoading by mutableStateOf(false)
+    var decRes by mutableStateOf<DecResult?>(null)
+    var decLoading by mutableStateOf(false)
+    var decError by mutableStateOf<String?>(null)
+    private var decKey: String? = null
+    private var decLocal: File? = null
+    var codeTitle by mutableStateOf("")
+    var codeText by mutableStateOf("")
     var analysis by mutableStateOf<AnalysisResult?>(null)
     var analyzing by mutableStateOf(false)
     var analysisPhase by mutableStateOf("")
@@ -128,6 +143,7 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
     var arcError by mutableStateOf<String?>(null)
     private var arcKey: String? = null
     private var analysisJob: Job? = null
+    private var analysisStale = true
 
     val listState = LazyListState()
     val gridState = LazyGridState()
@@ -186,7 +202,7 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
 
     fun openFolder(path: String) {
         val t = top
-        if (t is Screen.Browser) replaceTop(Screen.Browser(path, t.popOnBack)) else push(Screen.Browser(path))
+        if (t is Screen.Browser) replaceTop(Screen.Browser(path, t.popOnBack, t.sizes)) else push(Screen.Browser(path))
     }
 
     fun goUp() {
@@ -201,7 +217,7 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
         }
         val isRoot = volumes.any { it.path == t.path } || Net.isConnRoot(t.path)
         val par = if (isRoot) null else PathUtil.parent(t.path)
-        if (par == null) pop() else replaceTop(Screen.Browser(par))
+        if (par == null) pop() else replaceTop(Screen.Browser(par, false, t.sizes))
     }
 
     fun onBack(): Boolean {
@@ -232,6 +248,7 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
         searchResults = null
         searching = false
         searchJob?.cancel()
+        if (stack.none { it is Screen.Analyzer }) analysisStale = true
         reload()
     }
 
@@ -380,8 +397,13 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
             is Screen.Trash -> refreshTrash()
             is Screen.Home -> refreshHome()
             is Screen.Apps -> loadApps()
-            is Screen.Analyzer -> startAnalysis(false)
+            is Screen.Analyzer -> {
+                val force = analysisStale
+                analysisStale = false
+                startAnalysis(force)
+            }
             is Screen.Archive -> loadArchive(s.path)
+            is Screen.Decompile -> loadDecompile(s.path)
             else -> {}
         }
     }
@@ -681,7 +703,10 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
         if (list.isEmpty()) return
         val dir = (top as? Screen.Browser)?.path ?: PathUtil.parent(list[0].path) ?: return
         val ext = when (format) {
+            "tar" -> ".tar"
             "targz" -> ".tar.gz"
+            "tarbz2" -> ".tar.bz2"
+            "tarxz" -> ".tar.xz"
             "7z" -> ".7z"
             else -> ".zip"
         }
@@ -692,7 +717,10 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
             val dest = PathUtil.join(dir, PathUtil.uniqueName(b, dir, fn, false))
             val buf = ByteArray(256 * 1024)
             when (format) {
-                "targz" -> Archives.createTarGz(list, dest, p, buf)
+                "tar" -> Archives.createTar(list, dest, "tar", p, buf)
+                "targz" -> Archives.createTar(list, dest, "gz", p, buf)
+                "tarbz2" -> Archives.createTar(list, dest, "bz2", p, buf)
+                "tarxz" -> Archives.createTar(list, dest, "xz", p, buf)
                 "7z" -> Archives.createSevenZ(list, dest, app.cacheDir, p, buf)
                 else -> FileOps.zip(list, dest, p, buf)
             }
@@ -878,6 +906,7 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
                 val imgs = siblings.filter { it.type == FileType.IMAGE && !Fs.isRemote(it.path) }.map { it.path }
                 if (item.path in imgs) push(Screen.Images(imgs, imgs.indexOf(item.path))) else openExternal(item)
             }
+            FileType.AUDIO, FileType.VIDEO -> play(item, siblings)
             FileType.TEXT -> if (item.size <= 1_000_000L) push(Screen.Editor(item.path)) else openExternal(item)
             FileType.ARCHIVE -> if (Archives.supported(item.name)) {
                 dialog = AppDialog.ArchiveChoice(item)
@@ -903,6 +932,156 @@ class AppViewModel(private val app: Application) : AndroidViewModel(app) {
             } else {
                 Utils.view(app, file, mime ?: FileTypes.mime(item))
             }
+        }
+    }
+
+    fun play(item: FileItem, siblings: List<FileItem>) {
+        val video = item.type == FileType.VIDEO
+        val same = siblings.filter { it.type == item.type && !Fs.isRemote(it.path) }.map { it.path }
+        if (!Fs.isRemote(item.path) && item.path in same) {
+            push(Screen.Player(same, same.indexOf(item.path), video))
+            return
+        }
+        viewModelScope.launch {
+            val f = withContext(Dispatchers.IO) {
+                try {
+                    Utils.localCopy(app, item)
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            if (f == null) toast("Не удалось подготовить файл") else push(Screen.Player(listOf(f.path), 0, video))
+        }
+    }
+
+    fun openManageSpace(e: AppEntry) {
+        val cls = e.manageSpace ?: return
+        try {
+            val i = Intent()
+            i.setClassName(e.pkg, cls)
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            app.startActivity(i)
+        } catch (ex: Exception) {
+            toast("Не удалось открыть управление памятью: " + (ex.message ?: ""))
+        }
+    }
+
+    // ---------- Конвертер ----------
+
+    fun convert(item: FileItem, target: String, quality: Int) {
+        val dir = PathUtil.parent(item.path) ?: return
+        val base = item.name.substringBeforeLast('.', item.name)
+        val b = Fs.backend(dir)
+        when (item.type) {
+            FileType.IMAGE -> runTask("Конвертация") { p ->
+                p.current = item.name
+                val dest = PathUtil.join(dir, PathUtil.uniqueName(b, dir, "$base.$target", false))
+                Converter.convertImage(item, dest, target, quality)
+            }
+            FileType.AUDIO -> if (target == "wav") {
+                runTask("Конвертация") { p ->
+                    p.current = item.name
+                    val local = Utils.localCopy(app, item)
+                    val tmp = File(app.cacheDir, "conv_" + System.nanoTime() + ".wav")
+                    try {
+                        Converter.audioToWav(local, tmp, p)
+                        val dest = PathUtil.join(dir, PathUtil.uniqueName(b, dir, "$base.wav", false))
+                        b.output(dest, false).use { o -> tmp.inputStream().use { it.copyTo(o) } }
+                    } finally {
+                        tmp.delete()
+                    }
+                }
+            } else {
+                convertMedia(item, target, dir, base)
+            }
+            FileType.VIDEO -> convertMedia(item, target, dir, base)
+            else -> toast("Этот тип файла конвертировать нельзя")
+        }
+    }
+
+    private fun convertMedia(item: FileItem, target: String, dir: String, base: String) {
+        val p = Progress("Конвертация")
+        p.current = item.name
+        selection = emptySet()
+        task = p
+        viewModelScope.launch {
+            var err: String? = null
+            try {
+                val src = withContext(Dispatchers.IO) { Utils.localCopy(app, item) }
+                val tmp = File(app.cacheDir, "conv_" + System.nanoTime() + "." + target)
+                Converter.transform(app, src, tmp, target == "m4a", p)
+                withContext(Dispatchers.IO) {
+                    val b = Fs.backend(dir)
+                    val dest = PathUtil.join(dir, PathUtil.uniqueName(b, dir, "$base.$target", false))
+                    b.output(dest, false).use { o -> tmp.inputStream().use { it.copyTo(o) } }
+                    tmp.delete()
+                }
+            } catch (e: Exception) {
+                err = e.message ?: e.toString()
+            }
+            task = null
+            toast(if (p.cancelled) "Отменено" else if (err == null) "Готово" else "Ошибка: $err")
+            reload()
+        }
+    }
+
+    // ---------- Декомпиляция ----------
+
+    fun loadDecompile(path: String) {
+        if (decKey == path && decRes != null) return
+        decKey = path
+        decRes = null
+        decError = null
+        decLoading = true
+        viewModelScope.launch {
+            val r = withContext(Dispatchers.IO) {
+                try {
+                    val local = Utils.localCopy(app, FileItem(path, PathUtil.name(path), false, 0L))
+                    decLocal = local
+                    Pair(Decompiler.load(local, app.cacheDir), null as String?)
+                } catch (e: Throwable) {
+                    Pair(null as DecResult?, e.message ?: "Не удалось прочитать файл")
+                }
+            }
+            decRes = r.first
+            decError = r.second
+            decLoading = false
+        }
+    }
+
+    fun decompileClass(name: String) {
+        val r = decRes ?: return
+        val local = decLocal
+        var text = ""
+        runTask("Декомпиляция", { codeTitle = name; codeText = text; push(Screen.Code) }) { p ->
+            p.current = name
+            text = if (r.mode == "dex") {
+                val idx = r.dexOf[name] ?: 0
+                Decompiler.smali(r.dexFiles[idx], name)
+            } else {
+                if (local == null) throw java.io.IOException("Файл недоступен")
+                val single = local.name.lowercase().endsWith(".class")
+                Decompiler.java(local, if (single) null else name)
+            }
+        }
+    }
+
+    fun saveCode() {
+        val ext = if (decRes?.mode == "dex") ".smali" else ".java"
+        val name = codeTitle.substringAfterLast('.') + ext
+        val dir = Utils.primaryRoot() + "/Download"
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                try {
+                    Fs.local.mkdirs(dir)
+                    val dest = PathUtil.join(dir, PathUtil.uniqueName(Fs.local, dir, name, false))
+                    Fs.local.output(dest, false).use { it.write(codeText.toByteArray(Charsets.UTF_8)) }
+                    true
+                } catch (e: Exception) {
+                    false
+                }
+            }
+            toast(if (ok) "Сохранено в Download: $name" else "Не удалось сохранить")
         }
     }
 

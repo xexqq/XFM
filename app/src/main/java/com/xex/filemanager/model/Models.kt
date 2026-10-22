@@ -56,7 +56,8 @@ data class AppEntry(
     val version: String,
     val apkPath: String,
     val apkSize: Long,
-    val system: Boolean
+    val system: Boolean,
+    val manageSpace: String? = null
 )
 
 data class Volume(
@@ -77,7 +78,10 @@ object FileTypes {
         "yml", "yaml", "html", "htm", "css", "js", "kt", "kts", "java", "py", "sh", "c", "cpp", "h",
         "gradle", "toml", "sql", "bat", "lua", "php", "rb", "go", "rs", "smali", "srt", "list", "env"
     )
-    val archive = setOf("zip", "rar", "7z", "tar", "gz", "bz2", "xz", "jar", "cbz", "tgz")
+    val archive = setOf(
+        "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "jar", "cbz", "tgz", "tbz2", "txz",
+        "iso", "cab", "arj", "lzh", "wim", "dmg", "cpio", "deb", "rpm"
+    )
     val apk = setOf("apk", "apks", "xapk", "apkm")
     val zipLike = setOf("zip", "jar", "cbz")
 

@@ -85,7 +85,12 @@ fun XfmTopBar(
 class Crumb(val label: String?, val icon: Int?, val tint: Color?, val onClick: () -> Unit)
 
 @Composable
-fun PathBar(crumbs: List<Crumb>, onHome: () -> Unit, trailing: (@Composable () -> Unit)? = null) {
+fun PathBar(
+    crumbs: List<Crumb>,
+    onHome: () -> Unit,
+    trailing: (@Composable () -> Unit)? = null,
+    homeRes: Int = R.drawable.ic_x_home
+) {
     val x = LocalXfm.current
     val scroll = rememberScrollState()
     LaunchedEffect(crumbs.size, scroll.maxValue) { scroll.scrollTo(scroll.maxValue) }
@@ -104,7 +109,7 @@ fun PathBar(crumbs: List<Crumb>, onHome: () -> Unit, trailing: (@Composable () -
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Image(
-                    painter = painterResource(R.drawable.ic_x_home),
+                    painter = painterResource(homeRes),
                     contentDescription = "Главная",
                     modifier = Modifier
                         .size(34.dp)

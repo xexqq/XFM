@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -367,4 +368,74 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
         color = MaterialTheme.colorScheme.primary,
         modifier = modifier.padding(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 6.dp)
     )
+}
+
+/** Строка режима «анализ папок»: полоса размера, процент от объёма и флажок. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun SizeRow(
+    item: FileItem,
+    size: Long,
+    total: Long,
+    maxSize: Long,
+    selected: Boolean,
+    thumbs: Boolean,
+    onClick: () -> Unit,
+    onLong: () -> Unit
+) {
+    val x = LocalXfm.current
+    val frac = if (maxSize > 0L && size > 0L) (size.toFloat() / maxSize.toFloat()).coerceIn(0.01f, 1f) else 0f
+    val pct = if (total > 0L) size.toDouble() * 100.0 / total.toDouble() else 0.0
+    val bg = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else Color.Transparent
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(bg)
+            .combinedClickable(onClick = onClick, onLongClick = onLong)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .padding(start = 6.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            FileGlyph(item, 48.dp, thumbs)
+            Spacer(Modifier.width(8.dp))
+            Box(Modifier.weight(1f)) {
+                if (frac > 0f) {
+                    Row(Modifier.matchParentSize()) {
+                        Row(Modifier.fillMaxWidth(frac).fillMaxHeight()) {
+                            Box(Modifier.weight(0.1f).fillMaxHeight().background(Color(0xFF5AA9DE)))
+                            Box(Modifier.weight(0.9f).fillMaxHeight().background(Color(0xFFA7C957)))
+                        }
+                    }
+                }
+                Column(Modifier.fillMaxWidth()) {
+                    Text(
+                        text = item.name,
+                        fontSize = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val left = if (item.isDir) {
+                        (if (item.children >= 0) countLabel(item.children) + " " else "") + "(" + formatSize(size) + ")"
+                    } else {
+                        formatSize(size)
+                    }
+                    Text(text = left, fontSize = 14.sp, color = x.secondary, maxLines = 1)
+                }
+            }
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = String.format(java.util.Locale.getDefault(), "%.2f%%", pct),
+                fontSize = 14.sp,
+                color = x.secondary,
+                maxLines = 1
+            )
+            androidx.compose.material3.Checkbox(checked = selected, onCheckedChange = { onLong() })
+        }
+        HorizontalDivider(thickness = 1.dp, color = x.separator)
+    }
 }

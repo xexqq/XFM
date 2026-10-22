@@ -60,6 +60,9 @@ fun DialogHost(vm: AppViewModel) {
             confirmButton = {
                 Column {
                     TextButton(onClick = { close(); vm.push(Screen.Archive(d.item.path)) }) { Text("Просмотреть содержимое") }
+                    if (com.xex.filemanager.fs.Decompiler.supported(d.item.name)) {
+                        TextButton(onClick = { close(); vm.push(Screen.Decompile(d.item.path)) }) { Text("Декомпилировать") }
+                    }
                     TextButton(onClick = { close(); vm.extract(d.item, true) }) { Text("Распаковать в папку") }
                     TextButton(onClick = { close(); vm.extract(d.item, false) }) { Text("Распаковать сюда") }
                     TextButton(onClick = { close(); vm.openExternal(d.item) }) { Text("Открыть другим приложением") }
@@ -68,6 +71,7 @@ fun DialogHost(vm: AppViewModel) {
             dismissButton = { TextButton(onClick = close) { Text("Отмена") } }
         )
         is AppDialog.Compress -> CompressDialog(vm, d, close)
+        is AppDialog.Convert -> ConvertDialog(vm, d, close)
         is AppDialog.ConnEdit -> ConnDialog(d, close)
         is AppDialog.Info -> AlertDialog(
             onDismissRequest = close,
@@ -82,6 +86,9 @@ fun DialogHost(vm: AppViewModel) {
             confirmButton = {
                 Column {
                     TextButton(onClick = { close(); vm.openApp(d.entry.pkg) }) { Text("Открыть") }
+                    if (d.entry.manageSpace != null) {
+                        TextButton(onClick = { close(); vm.openManageSpace(d.entry) }) { Text("Управление памятью") }
+                    }
                     TextButton(onClick = { close(); vm.appDetails(d.entry.pkg) }) { Text("О приложении") }
                     TextButton(onClick = { close(); vm.saveApk(d.entry) }) { Text("Сохранить APK в Download") }
                     TextButton(onClick = { close(); vm.uninstallApp(d.entry.pkg) }) { Text("Удалить") }
@@ -105,6 +112,9 @@ fun DialogHost(vm: AppViewModel) {
                     TextButton(onClick = { close(); vm.openExternal(d.item, "*/*") }) { Text("Любой тип") }
                     if (com.xex.filemanager.fs.Archives.supported(d.item.name)) {
                         TextButton(onClick = { close(); vm.push(Screen.Archive(d.item.path)) }) { Text("Архив (просмотр)") }
+                    }
+                    if (com.xex.filemanager.fs.Decompiler.supported(d.item.name)) {
+                        TextButton(onClick = { close(); vm.push(Screen.Decompile(d.item.path)) }) { Text("Декомпилировать") }
                     }
                 }
             },
@@ -293,6 +303,7 @@ fun ProgressHost(vm: AppViewModel) {
 }
 
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun CompressDialog(vm: AppViewModel, d: AppDialog.Compress, close: () -> Unit) {
     val def = if (d.items.size == 1) {
@@ -315,8 +326,11 @@ private fun CompressDialog(vm: AppViewModel, d: AppDialog.Compress, close: () ->
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(10.dp))
-                Row {
-                    listOf("zip" to "ZIP", "targz" to "TAR.GZ", "7z" to "7Z").forEach { f ->
+                androidx.compose.foundation.layout.FlowRow {
+                    listOf(
+                        "zip" to "ZIP", "7z" to "7Z", "targz" to "TAR.GZ",
+                        "tarxz" to "TAR.XZ", "tarbz2" to "TAR.BZ2", "tar" to "TAR"
+                    ).forEach { f ->
                         androidx.compose.material3.FilterChip(
                             selected = format == f.first,
                             onClick = { format = f.first },
@@ -332,6 +346,52 @@ private fun CompressDialog(vm: AppViewModel, d: AppDialog.Compress, close: () ->
                 enabled = name.isNotBlank() && !name.contains('/'),
                 onClick = { close(); vm.compress(d.items, name.trim(), format) }
             ) { Text("Сжать") }
+        },
+        dismissButton = { TextButton(onClick = close) { Text("Отмена") } }
+    )
+}
+
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ConvertDialog(vm: AppViewModel, d: AppDialog.Convert, close: () -> Unit) {
+    val targets = remember { com.xex.filemanager.fs.Converter.targetsFor(d.item).filter { it != d.item.ext } }
+    var target by remember { mutableStateOf(targets.firstOrNull() ?: "") }
+    var quality by remember { mutableStateOf(90f) }
+    AlertDialog(
+        onDismissRequest = close,
+        title = { Text("Конвертировать") },
+        text = {
+            Column {
+                Text(d.item.name, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(8.dp))
+                androidx.compose.foundation.layout.FlowRow {
+                    targets.forEach { t ->
+                        androidx.compose.material3.FilterChip(
+                            selected = target == t,
+                            onClick = { target = t },
+                            label = { Text(t.uppercase()) },
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                    }
+                }
+                if (target == "jpg" || target == "webp") {
+                    Spacer(Modifier.height(6.dp))
+                    Text("Качество: " + quality.toInt() + "%", style = MaterialTheme.typography.bodySmall)
+                    androidx.compose.material3.Slider(value = quality, onValueChange = { quality = it }, valueRange = 40f..100f)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Результат сохранится рядом с исходным файлом. Формат MP3 недоступен: в Android нет кодировщика MP3.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = target.isNotEmpty(), onClick = { close(); vm.convert(d.item, target, quality.toInt()) }) {
+                Text("Конвертировать")
+            }
         },
         dismissButton = { TextButton(onClick = close) { Text("Отмена") } }
     )

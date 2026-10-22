@@ -1,6 +1,5 @@
 package com.xex.filemanager.fs
 
-import com.github.junrar.Archive
 import com.xex.filemanager.model.FileItem
 import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry
 import org.apache.commons.compress.archivers.sevenz.SevenZFile
@@ -8,7 +7,12 @@ import org.apache.commons.compress.archivers.sevenz.SevenZOutputFile
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
+import net.sf.sevenzipjbinding.ISequentialOutStream
+import net.sf.sevenzipjbinding.SevenZip
+import net.sf.sevenzipjbinding.impl.RandomAccessFileInStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
+import org.apache.commons.compress.compressors.bzip2.BZip2CompressorOutputStream
+import org.apache.commons.compress.compressors.xz.XZCompressorOutputStream
 import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -18,6 +22,8 @@ import java.io.FileOutputStream
 import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
+import java.io.RandomAccessFile
 import java.nio.charset.Charset
 import java.util.Date
 import java.util.zip.GZIPInputStream
@@ -38,7 +44,9 @@ object Archives {
             n.endsWith(".tar.xz") || n.endsWith(".txz") -> "tarxz"
             n.endsWith(".tar") -> "tar"
             n.endsWith(".7z") -> "7z"
-            n.endsWith(".rar") -> "rar"
+            n.endsWith(".rar") || n.endsWith(".iso") || n.endsWith(".cab") || n.endsWith(".arj") ||
+                n.endsWith(".lzh") || n.endsWith(".lha") || n.endsWith(".wim") || n.endsWith(".dmg") ||
+                n.endsWith(".cpio") || n.endsWith(".deb") || n.endsWith(".rpm") -> "sz"
             n.endsWith(".gz") -> "gz"
             n.endsWith(".bz2") -> "bz2"
             n.endsWith(".xz") -> "xz"
@@ -115,15 +123,24 @@ object Archives {
                     e = sz.nextEntry
                 }
             }
-            "rar" -> Archive(file).use { a ->
-                var h = a.nextFileHeader()
-                while (true) {
-                    val cur = h ?: break
-                    val ent = ArchiveEntry(clean(cur.fileName), cur.isDirectory, cur.fullUnpackSize, cur.mTime?.time ?: 0L)
-                    if (ent.path.isNotEmpty()) {
+            "sz" -> {
+                val raf = RandomAccessFile(file, "r")
+                val ar = SevenZip.openInArchive(null, RandomAccessFileInStream(raf))
+                try {
+                    for (item in ar.simpleInterface.archiveItems) {
+                        val ent = ArchiveEntry(
+                            clean(item.path ?: ""), item.isFolder,
+                            item.size ?: 0L, item.lastWriteTime?.time ?: 0L
+                        )
+                        if (ent.path.isEmpty()) continue
                         val go = visit(ent) {
-                            val t = File.createTempFile("rar", ".tmp", tmp)
-                            FileOutputStream(t).use { o -> a.extractFile(cur, o) }
+                            val t = File.createTempFile("sz", ".tmp", tmp)
+                            FileOutputStream(t).use { o ->
+                                item.extractSlow(ISequentialOutStream { data ->
+                                    o.write(data)
+                                    data.size
+                                })
+                            }
                             object : FilterInputStream(FileInputStream(t)) {
                                 override fun close() {
                                     super.close()
@@ -133,7 +150,17 @@ object Archives {
                         }
                         if (!go) break
                     }
-                    h = a.nextFileHeader()
+                } finally {
+                    try {
+                        ar.close()
+                    } catch (e: Exception) {
+                        // игнорируем
+                    }
+                    try {
+                        raf.close()
+                    } catch (e: Exception) {
+                        // игнорируем
+                    }
                 }
             }
             "gz", "bz2", "xz" -> {
@@ -208,9 +235,17 @@ object Archives {
 
     // ---------- Создание TAR.GZ и 7Z ----------
 
-    fun createTarGz(items: List<FileItem>, dest: String, p: Progress, buf: ByteArray) {
+    /** mode: "tar" (без сжатия), "gz", "bz2", "xz". */
+    fun createTar(items: List<FileItem>, dest: String, mode: String, p: Progress, buf: ByteArray) {
         val ob = Fs.backend(dest)
-        val os = TarArchiveOutputStream(GZIPOutputStream(BufferedOutputStream(ob.output(dest, false))))
+        val raw = BufferedOutputStream(ob.output(dest, false))
+        val comp: OutputStream = when (mode) {
+            "gz" -> GZIPOutputStream(raw)
+            "bz2" -> BZip2CompressorOutputStream(raw)
+            "xz" -> XZCompressorOutputStream(raw)
+            else -> raw
+        }
+        val os = TarArchiveOutputStream(comp)
         os.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX)
         os.setBigNumberMode(TarArchiveOutputStream.BIGNUMBER_POSIX)
         os.use { t ->

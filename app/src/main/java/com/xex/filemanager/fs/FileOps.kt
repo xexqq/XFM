@@ -3,7 +3,9 @@ package com.xex.filemanager.fs
 import android.content.ContentResolver
 import android.content.Context
 import android.os.Environment
+import android.app.usage.StorageStatsManager
 import android.os.StatFs
+import android.os.storage.StorageManager
 import android.provider.MediaStore
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -339,15 +341,30 @@ object FileOps {
     fun volumes(ctx: Context): List<Volume> {
         val out = ArrayList<Volume>()
         val primary = Environment.getExternalStorageDirectory().absolutePath
+        var sTotal = 0L
+        var sFree = 0L
+        try {
+            val ssm = ctx.getSystemService(Context.STORAGE_STATS_SERVICE) as StorageStatsManager
+            sTotal = ssm.getTotalBytes(StorageManager.UUID_DEFAULT)
+            sFree = ssm.getFreeBytes(StorageManager.UUID_DEFAULT)
+        } catch (e: Exception) {
+            // используем StatFs
+        }
         fun add(path: String, label: String, removable: Boolean) {
             try {
                 val st = StatFs(path)
-                out.add(Volume(path, label, st.blockCountLong * st.blockSizeLong, st.availableBlocksLong * st.blockSizeLong, removable))
+                var total = st.blockCountLong * st.blockSizeLong
+                var free = st.availableBlocksLong * st.blockSizeLong
+                if (path == primary && sTotal > 0L) {
+                    total = sTotal
+                    free = sFree
+                }
+                out.add(Volume(path, label, total, free, removable))
             } catch (e: Exception) {
                 out.add(Volume(path, label, 0L, 0L, removable))
             }
         }
-        add(primary, "Внутренняя память", false)
+        add(primary, "Основная память", false)
         for (f in ctx.getExternalFilesDirs(null)) {
             if (f == null) continue
             val s = f.absolutePath

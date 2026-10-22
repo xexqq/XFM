@@ -53,6 +53,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -80,7 +81,10 @@ import com.xex.filemanager.model.Volume
 import com.xex.filemanager.net.Net
 import com.xex.filemanager.util.Utils
 import com.xex.filemanager.util.dayLabel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import com.xex.filemanager.fs.FileOps
 
 fun sortItems(list: List<FileItem>, by: Int, asc: Boolean, foldersFirst: Boolean): List<FileItem> {
     val cmp: Comparator<FileItem> = when (by) {
@@ -152,12 +156,30 @@ fun BrowserScreen(vm: AppViewModel, onMenu: () -> Unit) {
     val isRecent = cat == Cat.RECENT
 
     val base = vm.searchResults ?: vm.items
-    val shown = remember(base, vm.query, vm.searchResults, s.showHidden, s.sortBy, s.sortAsc, s.foldersFirst, isRecent) {
+    val shownBase = remember(base, vm.query, vm.searchResults, s.showHidden, s.sortBy, s.sortAsc, s.foldersFirst, isRecent) {
         var l = base
         if (!s.showHidden) l = l.filter { !it.name.startsWith(".") }
         val q = vm.query.trim()
         if (q.isNotEmpty() && vm.searchResults == null) l = l.filter { it.name.contains(q, ignoreCase = true) }
         if (isRecent) l.sortedByDescending { it.modified } else sortItems(l, s.sortBy, s.sortAsc, s.foldersFirst)
+    }
+    val sizesMode = (top as? Screen.Browser)?.sizes == true
+    val an = vm.analysis
+    val dirSizes by produceState(emptyMap<String, Long>(), vm.items, an, sizesMode) {
+        value = if (!sizesMode) {
+            emptyMap()
+        } else {
+            withContext(Dispatchers.IO) {
+                val m = HashMap<String, Long>()
+                for (f in vm.items) {
+                    if (f.isDir) m[f.path] = an?.dirSizes?.get(f.path) ?: FileOps.sizeOf(f)
+                }
+                m
+            }
+        }
+    }
+    val shown = remember(shownBase, dirSizes, sizesMode) {
+        if (sizesMode) shownBase.sortedByDescending { if (it.isDir) (dirSizes[it.path] ?: 0L) else it.size } else shownBase
     }
     val shownAlbums = remember(vm.albums, vm.query) {
         val q = vm.query.trim()
@@ -371,7 +393,11 @@ fun BrowserScreen(vm: AppViewModel, onMenu: () -> Unit) {
                         }
                     }
                 )
-                PathBar(crumbs, onHome = { vm.goHome() }, trailing = trailing)
+                if (sizesMode) {
+                    PathBar(crumbs, onHome = { vm.pop() }, trailing = null, homeRes = R.drawable.ic_x_pie)
+                } else {
+                    PathBar(crumbs, onHome = { vm.goHome() }, trailing = trailing)
+                }
                 if (vm.searchOpen && path != null) {
                     Surface(color = MaterialTheme.colorScheme.background) {
                         Row(
@@ -477,6 +503,27 @@ fun BrowserScreen(vm: AppViewModel, onMenu: () -> Unit) {
                         modifier = Modifier.align(Alignment.Center)
                     )
                 }
+                sizesMode -> {
+                    val maxSize = if (shown.isEmpty()) 0L else {
+                        val f = shown[0]
+                        if (f.isDir) (dirSizes[f.path] ?: 0L) else f.size
+                    }
+                    val total = an?.volume?.total ?: 0L
+                    LazyColumn(Modifier.fillMaxSize()) {
+                        items(shown, key = { it.path }) { item ->
+                            SizeRow(
+                                item = item,
+                                size = if (item.isDir) (dirSizes[item.path] ?: 0L) else item.size,
+                                total = total,
+                                maxSize = maxSize,
+                                selected = item.path in vm.selection,
+                                thumbs = s.thumbs,
+                                onClick = { if (selMode) vm.toggleSelect(item.path) else vm.open(item, shown) },
+                                onLong = { vm.toggleSelect(item.path) }
+                            )
+                        }
+                    }
+                }
                 isRecent -> {
                     val groups = remember(shown) { shown.groupBy { dayLabel(it.modified) } }
                     LazyColumn(Modifier.fillMaxSize()) {
@@ -565,6 +612,27 @@ private fun SelectionMenu(vm: AppViewModel, sel: List<FileItem>, shown: List<Fil
             leadingIcon = { Icon(Icons.Filled.Info, null) },
             onClick = { close(); vm.dialog = AppDialog.Properties(one) }
         )
+        if (one.type == com.xex.filemanager.model.FileType.IMAGE) {
+            DropdownMenuItem(
+                text = { Text("Редактировать фото") },
+                leadingIcon = { Icon(Icons.Filled.Edit, null) },
+                onClick = { close(); vm.push(Screen.PhotoEdit(one.path)) }
+            )
+        }
+        if (com.xex.filemanager.fs.Converter.targetsFor(one).isNotEmpty()) {
+            DropdownMenuItem(
+                text = { Text("Конвертировать…") },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_open_in_new), null) },
+                onClick = { close(); vm.dialog = AppDialog.Convert(one) }
+            )
+        }
+        if (!one.isDir && com.xex.filemanager.fs.Decompiler.supported(one.name)) {
+            DropdownMenuItem(
+                text = { Text("Декомпилировать") },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_terminal), null) },
+                onClick = { close(); vm.push(Screen.Decompile(one.path)) }
+            )
+        }
         DropdownMenuItem(
             text = { Text("Открыть как…") },
             leadingIcon = { Icon(painterResource(R.drawable.ic_open_in_new), null) },

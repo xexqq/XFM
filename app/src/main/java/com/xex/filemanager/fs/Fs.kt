@@ -9,6 +9,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileNotFoundException
 import java.io.FileOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 
@@ -82,7 +83,10 @@ class RemoteBackend(private val svc: IFileService) : FsBackend {
 
     override fun list(path: String): List<FileItem>? {
         val raw = svc.list(path) ?: return null
-        if (raw == "!") return null
+        if (raw.startsWith("!")) {
+            val msg = raw.substring(1)
+            throw IOException(if (msg.isEmpty()) "Нет доступа к папке" else "Нет доступа к папке ($msg)")
+        }
         val out = ArrayList<FileItem>()
         for (line in raw.split('\n')) {
             if (line.isEmpty()) continue

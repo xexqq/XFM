@@ -44,7 +44,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.xex.filemanager.AppDialog
 import com.xex.filemanager.AppViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.xex.filemanager.data.AppSettings
 import com.xex.filemanager.data.Palettes
 import com.xex.filemanager.fs.Fs
@@ -74,7 +78,7 @@ fun SettingsScreen(vm: AppViewModel) {
         ) {
             // ---------- Shizuku ----------
             SectionTitle("Shizuku — доступ к системным папкам")
-            ShizukuCard(s)
+            ShizukuCard(vm, s)
 
             // ---------- Тема ----------
             SectionTitle("Тема оформления")
@@ -187,8 +191,9 @@ private fun SwitchRow(title: String, subtitle: String?, checked: Boolean, onChan
 }
 
 @Composable
-private fun ShizukuCard(s: AppSettings) {
+private fun ShizukuCard(vm: AppViewModel, s: AppSettings) {
     val ctx = LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val st = ShizukuManager.state
     val title: String
     val text: String
@@ -243,6 +248,20 @@ private fun ShizukuCard(s: AppSettings) {
                     }
                 }
                 OutlinedButton(onClick = { ShizukuManager.clearError(); ShizukuManager.refresh() }) { Text("Обновить") }
+            }
+            if (st == ShizukuState.CONNECTED) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = {
+                    scope.launch {
+                        val out = withContext(Dispatchers.IO) {
+                            ShizukuManager.exec(
+                                "id; ls -ld /sdcard/Android/data; ls /sdcard/Android/data | head -3; " +
+                                    "ls /storage/emulated/0/Android/data | head -3"
+                            )
+                        }
+                        vm.dialog = AppDialog.Info("Проверка доступа", out.take(1500))
+                    }
+                }) { Text("Проверить доступ") }
             }
             Spacer(Modifier.height(12.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

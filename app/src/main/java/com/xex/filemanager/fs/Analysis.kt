@@ -21,7 +21,8 @@ data class AnalysisResult(
     val cacheTotal: Long,
     val dupGroups: List<List<FileItem>>,
     val dupTotal: Long,
-    val exact: Boolean
+    val exact: Boolean,
+    val dirSizes: Map<String, Long>
 )
 
 object Analyzer {
@@ -44,6 +45,7 @@ object Analyzer {
         val sizes = LongArray(6)
         val big = ArrayList<FileItem>()
         val bySize = HashMap<Long, MutableList<FileItem>>()
+        val dirSizes = HashMap<String, Long>()
         var count = 0
         val stack = ArrayDeque<String>()
         stack.add(volume.path)
@@ -62,6 +64,12 @@ object Analyzer {
                 count++
                 if (count % 40 == 0) status("Сканирование файлов", c.path, count)
                 sizes[catIndex(c)] += c.size
+                var anc = PathUtil.parent(c.path)
+                while (anc != null && anc.length >= volume.path.length) {
+                    dirSizes[anc] = (dirSizes[anc] ?: 0L) + c.size
+                    if (anc == volume.path) break
+                    anc = PathUtil.parent(anc)
+                }
                 if (c.size >= BIG) big.add(c)
                 if (c.size >= 4096L) bySize.getOrPut(c.size) { ArrayList() }.add(c)
             }
@@ -115,7 +123,8 @@ object Analyzer {
             cacheTotal = caches.sumOf { it.second },
             dupGroups = groups,
             dupTotal = groups.sumOf { it[0].size * (it.size - 1) },
-            exact = usage
+            exact = usage,
+            dirSizes = dirSizes
         )
     }
 }

@@ -25,6 +25,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -101,6 +102,9 @@ fun ImageViewerScreen(vm: AppViewModel, s: Screen.Images) {
                     modifier = Modifier.weight(1f)
                 )
                 Text("${pager.currentPage + 1}/${s.paths.size}", color = Color.White, modifier = Modifier.padding(end = 4.dp))
+                IconButton(onClick = { vm.push(Screen.PhotoEdit(s.paths[pager.currentPage])) }) {
+                    Icon(Icons.Filled.Edit, "Редактировать", tint = Color.White)
+                }
                 IconButton(onClick = { Utils.share(ctx, listOf(File(s.paths[pager.currentPage]))) }) {
                     Icon(Icons.Filled.Share, "Поделиться", tint = Color.White)
                 }
