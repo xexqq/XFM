@@ -6,7 +6,6 @@ import org.jf.baksmali.Adaptors.ClassDefinition
 import org.jf.baksmali.BaksmaliOptions
 import org.jf.dexlib2.DexFileFactory
 import org.jf.dexlib2.Opcodes
-import org.jf.util.IndentingWriter
 import java.io.File
 import java.io.StringWriter
 import java.util.regex.Pattern
@@ -71,7 +70,18 @@ object Decompiler {
         for (c in dex.classes) {
             if (c.type == type) {
                 val sw = StringWriter()
-                ClassDefinition(BaksmaliOptions(), c).writeTo(IndentingWriter(sw))
+                val cd = ClassDefinition(BaksmaliOptions(), c)
+                // Тип писателя отличается между версиями baksmali, поэтому создаём его через рефлексию
+                val m = ClassDefinition::class.java.methods.first { it.name == "writeTo" && it.parameterTypes.size == 1 }
+                val wt = m.parameterTypes[0]
+                val ctor = wt.constructors.first {
+                    it.parameterTypes.isNotEmpty() && it.parameterTypes[0] == java.io.Writer::class.java
+                }
+                val args = arrayOfNulls<Any>(ctor.parameterTypes.size)
+                args[0] = sw
+                val writer = ctor.newInstance(*args)
+                m.invoke(cd, writer)
+                (writer as java.io.Writer).flush()
                 return sw.toString()
             }
         }

@@ -29,7 +29,7 @@ object AppsRepo {
             } catch (e: Exception) {
                 p.packageName
             }
-            out.add(AppEntry(label, p.packageName, p.versionName ?: "", src, File(src).length(), system, ai.manageSpaceActivity))
+            out.add(AppEntry(label, p.packageName, p.versionName ?: "", src, File(src).length(), system, ai.manageSpaceActivityName))
         }
         return out.sortedBy { it.label.lowercase() }
     }
